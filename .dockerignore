@@ -1,0 +1,20 @@
+# No copiar al contexto de build: repo, deps locales, docs y temporales.
+.git
+.github
+node_modules
+vendor
+.env
+.env.*
+!.env.example
+.phpunit.result.cache
+docs
+tests
+storage/logs/*
+storage/framework/cache/*
+storage/framework/sessions/*
+storage/framework/views/*
+bootstrap/cache/*
+Dockerfile
+.dockerignore
+docker-compose*.yml
+compose*.yml

@@ -16,6 +16,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         // Sesión + cookies para peticiones que vengan del front (lista SANCTUM_STATEFUL_DOMAINS).
         $middleware->statefulApi();
+        $middleware->trustProxies(at: '*');
 
         $middleware->alias([
             'verified' => EnsureEmailIsVerified::class,

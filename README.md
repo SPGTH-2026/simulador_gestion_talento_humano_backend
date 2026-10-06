@@ -1,48 +1,77 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Simulador de Procesos de Gestión de Talento Humano — Backend
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+API REST en Laravel 13 para el simulador de procesos de gestión de talento humano de una
+institución educativa.
 
-## Entorno de desarrollo
+Esta documentación está escrita para alguien que **nunca ha visto este proyecto**, y que quizá
+tampoco haya trabajado antes con Laravel.
+
+---
+
+## Empieza por aquí
+
+Si no sabes por dónde, este es el orden:
+
+| # | Documento | De qué va |
+|---|---|---|
+| 0 | [Qué es este proyecto](docs/00-que-es-este-proyecto.md) | Qué hace, qué tiene y qué no tiene |
+| 1 | [Instalación](docs/01-instalacion.md) | Ponerlo a funcionar desde cero |
+| 2 | [Cómo funciona una petición](docs/02-como-funciona-una-peticion.md) | Qué pasa cuando el navegador pide algo |
+| 3 | [Estructura del proyecto](docs/03-estructura-del-proyecto.md) | Qué hay en cada carpeta |
+| 4 | [Base de datos](docs/04-base-de-datos.md) | Tablas, cuentas de prueba |
+| 5 | [Autenticación](docs/05-autenticacion.md) | Login, cookie, sesión |
+| 6 | [Códigos OTP](docs/06-codigos-otp.md) | Verificación de correo y recuperación |
+| 7 | [Roles y permisos](docs/07-roles-y-permisos.md) | Quién puede hacer qué |
+| 8 | [Correo](docs/08-correo.md) | Configurar el envío real |
+| 9 | [Login con Google](docs/09-login-con-google.md) | OAuth y sus riesgos |
+| 10 | [Configuración](docs/10-configuracion.md) | Todas las variables de entorno |
+| 11 | [Pruebas](docs/11-pruebas.md) | Las 28 pruebas y cómo escribirlas |
+| 12 | [Convenciones](docs/12-convenciones.md) | Cómo se escribe el código aquí |
+| 13 | [Pendientes](docs/13-pendientes.md) | Lo que **no** está terminado |
+
+---
+
+## Arranque rápido
+
+Si solo quieres levantarlo para curiosear:
+
+```bash
+# 1. Dependencias
+composer install
+
+# 2. Configuración
+cp .env.example .env
+php artisan key:generate
+
+# 3. Base de datos (crea antes bd_spgth en MySQL)
+php artisan migrate --seed
+
+# 4. Arrancar
+php artisan serve
+```
+
+El backend queda en `http://localhost:8000`.
 
 ### Requisitos
 
-- PHP 8.3+
-- Composer
-- MySQL (este proyecto **no** usa SQLite)
+- **PHP 8.3** o superior
+- **Composer**
+- **MySQL** (este proyecto **no** usa SQLite)
 
-### Instalación
+### Las dos bases de datos
 
-```bash
-composer install
-cp .env.example .env
-php artisan key:generate
-php artisan migrate --seed
-```
+| Base | Para qué |
+|---|---|
+| `bd_spgth` | Desarrollo. La puebla `--seed` |
+| `bd_spgth_testing` | Pruebas. `phpunit.xml` apunta aquí |
 
-### Bases de datos
-
-Se usan **dos** bases separadas:
-
-| Base | Uso |
-|------|-----|
-| `bd_spgth` | Desarrollo. La puebla `--seed` con las cuentas demo. |
-| `bd_spgth_testing` | Pruebas. `phpunit.xml` apunta aquí. Nunca se toca `bd_spgth`. |
-
-`bd_spgth_testing` **debe existir antes de correr las pruebas**. Si no existe,
-la suite falla con `unknown database` o `SQLSTATE[HY000]`. Se crea una vez:
+`bd_spgth_testing` **debe existir antes de correr las pruebas**:
 
 ```sql
 CREATE DATABASE bd_spgth_testing CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-Las pruebas usan MySQL, no SQLite, porque la extensión `pdo_sqlite` no está
-disponible en el entorno de desarrollo. Las migraciones se ejecutan solas
-sobre esa base en cada corrida.
+Detalle en [Instalación](docs/01-instalacion.md).
 
 ### Pruebas
 
@@ -50,100 +79,107 @@ sobre esa base en cada corrida.
 php artisan test
 ```
 
-### Frontend y CORS
+---
 
-El frontend vive en otro repositorio y en desarrollo corre en
-`http://localhost:5173`. El backend permite ese origen vía CORS con
-credenciales, usando `FRONTEND_URL` (o `CORS_ALLOWED_ORIGINS` si necesitas
-varios orígenes). El frontend debe usar siempre `localhost`, nunca mezclado
-con `127.0.0.1`: las cookies distinguen host, no puerto.
+## Qué hace este backend
 
-### Login con Google
+**Ahora mismo, solo autenticación.** Las 10 rutas que expone son de login, registro,
+verificación de correo y recuperación de contraseña.
 
-Requiere credenciales propias en `.env`:
+Los roles y permisos ya están definidos (4 roles, 5 subroles, 18 permisos), pero **todavía no
+hay rutas de negocio** que los usen. Está anotado en [Pendientes](docs/13-pendientes.md).
 
-```
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-GOOGLE_REDIRECT_URI=http://localhost:8000/api/auth/google/callback
-```
-
-El `redirect_uri` debe coincidir **exactamente** con el registrado en Google
-Cloud Console.
-
-### Correo (códigos OTP)
-
-Los códigos de verificación de correo y de recuperación de contraseña se envían
-por email. En desarrollo se puede dejar `MAIL_MAILER=log`: el código se escribe
-en `storage/logs/laravel.log` y **no** llega a ningún buzón. Para envío real con
-Gmail:
-
-1. Activar la verificación en dos pasos en la cuenta de Google.
-2. Generar una **contraseña de aplicación** en
-   `myaccount.google.com/apppasswords` (16 caracteres, sin espacios).
-3. Configurar en `.env`:
+## Las 10 rutas
 
 ```
-MAIL_MAILER=smtp
-MAIL_SCHEME=null
-MAIL_HOST=smtp.gmail.com
-MAIL_PORT=587
-MAIL_USERNAME=tu-cuenta@gmail.com
-MAIL_PASSWORD=contraseña-de-aplicación-sin-espacios
-MAIL_FROM_ADDRESS="tu-cuenta@gmail.com"
-MAIL_FROM_NAME="Simulador SPGTH"
+POST   /api/auth/register                     registrarse
+POST   /api/auth/login                        iniciar sesión
+POST   /api/auth/forgot-password              pedir código de recuperación
+POST   /api/auth/reset-password               cambiar la contraseña
+GET    /api/auth/google/redirect             login con Google (salida)
+GET    /api/auth/google/callback              login con Google (vuelta)
+GET    /api/auth/me                           quién soy
+POST   /api/auth/logout                       cerrar sesión
+POST   /api/auth/verification/send            reenviar el código
+POST   /api/auth/verification/confirm         confirmar el código
 ```
 
-`MAIL_FROM_ADDRESS` debe ser el **mismo** correo autenticado, o Gmail rechaza el
-envío. `MAIL_SCHEME=null` deja que Laravel use STARTTLS en el puerto 587; **no**
-usar `tls` (Symfony solo acepta `smtp` o `smtps`).
+Detalle en [Autenticación](docs/05-autenticacion.md).
 
-## About Laravel
+## Decisiones que conviene conocer
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+Cuatro cosas que no son obvias, y que sí están documentadas en detalle:
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+| Decisión | Por qué |
+|---|---|
+| **Login con cookie, no token** | Sanctum `statefulApi()`. El token ya no viaja ni en JSON ni en la URL |
+| **El registro no inicia sesión** | Hay que verificar el correo primero |
+| **Google también exige OTP** | Que Google confirme un correo no prueba que esté bien escrito aquí |
+| **No se vincula Google por correo** | Evita que alguien tome una cuenta ajena |
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## Cuentas de prueba
 
-## Learning Laravel
+`php artisan migrate --seed` crea 8 cuentas. La contraseña sale de `SEED_PASSWORD`, y por
+defecto es `Dev12345`.
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+| Correo | Rol | Subrol |
+|---|---|---|
+| `admin@test.com` | `super_admin` | — |
+| `instructor@test.com` | `instructor` | — |
+| `general@test.com` | `aprendiz` | `general` |
+| `evaluador@test.com` | `aprendiz` | `evaluador` |
+| `seleccionador@test.com` | `aprendiz` | `seleccionador` |
+| `revisor@test.com` | `aprendiz` | `revisor_documental` |
+| `gestor@test.com` | `aprendiz` | `gestor_convocatorias` |
+| `aspirante@test.com` | `aspirante` | — |
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+Todas con `email_verified_at` ya confirmado, para poder probar sin pasar por el correo.
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+## El frontend
 
-## Agentic Development
+Va en un repositorio aparte: `simulador-gestion-talento-humano-frontend-main`, en la carpeta
+hermana. Es un SPA en React + Vite que habla con esta API.
 
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+Este repositorio es **solo el backend**. La frontera entre los dos está explicada en
+[Estructura del proyecto](docs/03-estructura-del-proyecto.md).
 
-```bash
-composer require laravel/boost --dev
+## La pila técnica
 
-php artisan boost:install
+| Pieza | Versión |
+|---|---|
+| PHP | ^8.3 |
+| Laravel | ^13.17 |
+| MySQL | 8 |
+| Sanctum | ^4.0 |
+| Socialite | ^5.31 |
+| PHPUnit | ^12.5.12 |
+
+## Estructura
+
+```
+app/
+├── Http/Controllers/Api/     ← AuthController, SocialAuthController
+├── Models/                   ← User, EmailOtp, SocialAccount
+├── Services/                 ← OtpService
+├── Mail/                     ← OtpMail
+├── Enums/                    ← Role
+├── Providers/                ← AppServiceProvider (permisos, rate limits)
+config/                       ← permisos, cors, sanctum
+database/
+├── migrations/               ← 6 archivos, 11 tablas
+└── seeders/                  ← DatabaseSeeder, DemoUsersSeeder
+routes/api.php                ← las 10 rutas
+tests/Feature/                ← 27 pruebas + 1 unitaria = 28 en total
+docs/                         ← esta documentación
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Detalle completo en [Estructura del proyecto](docs/03-estructura-del-proyecto.md).
 
-## Contributing
+---
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Documentación de Laravel
 
-## Code of Conduct
-
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+- [Documentación de Laravel 13](https://laravel.com/docs)
+- [Laravel Sanctum](https://laravel.com/docs/sanctum)
+- [Laravel Socialite](https://laravel.com/docs/socialite)
+- [Laravel Pint](https://laravel.com/docs/pint)
