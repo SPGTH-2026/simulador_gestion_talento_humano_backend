@@ -133,6 +133,33 @@ class OtpFlowTest extends TestCase
         ])->assertStatus(422);
     }
 
+    public function test_dos_peticiones_en_rafaga_producen_un_solo_correo(): void
+    {
+        $u = $this->user(['email' => 'rafaga@test.com']);
+
+        // El mismo doble envio llegado dos veces (doble click, reintento del
+        // proxy): la segunda no debe generar otro codigo ni matar el primero.
+        $this->postJson('/api/auth/forgot-password', ['email' => $u->email])->assertOk();
+        $this->postJson('/api/auth/forgot-password', ['email' => $u->email])->assertOk();
+
+        Mail::assertSent(OtpMail::class, 1);
+        $this->assertDatabaseCount('email_otps', 1);
+
+        // El codigo del UNICO correo recibido sigue siendo el valido.
+        $this->postJson('/api/auth/reset-password', [
+            'email' => $u->email,
+            'code' => $this->codeDeLog(),
+            'password' => 'NuevaClave99',
+            'password_confirmation' => 'NuevaClave99',
+        ])->assertOk();
+        $this->assertTrue(Hash::check('NuevaClave99', $u->fresh()->password));
+
+        // Pasada la ventana, un envio nuevo si que emite correo.
+        $this->travel(OtpService::IDEMPOTENCY_SECONDS + 1)->seconds();
+        $this->postJson('/api/auth/forgot-password', ['email' => $u->email])->assertOk();
+        Mail::assertSent(OtpMail::class, 2);
+    }
+
     public function test_un_codigo_no_sirve_para_dos_purpositos(): void
     {
         $u = $this->user(['email' => 'mixto@test.com', 'email_verified_at' => null]);

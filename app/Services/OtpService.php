@@ -21,8 +21,22 @@ class OtpService
     public const MAX_ATTEMPTS = 3;
 
     /**
+     * Segundos durante los que un segundo envío reutiliza el código vigente.
+     *
+     * Un doble click, un reenvío del proxy o cualquier ráfaga llegan en menos
+     * de un segundo. Sin esta ventana la segunda petición ejecuta clear() y
+     * deja sin validez el código que el usuario acaba de recibir, de modo que
+     * el primer correo que leyó deja de servir.
+     */
+    public const IDEMPOTENCY_SECONDS = 5;
+
+    /**
      * Genera un código nuevo y lo envía por correo.
      * Invalida cualquier código anterior del mismo propósito.
+     *
+     * Si hace menos de IDEMPOTENCY_SECONDS que se envió un código que sigue
+     * vivo, no se genera ni se envía otro: se devuelve true como si se hubiera
+     * enviado. Dos peticiones en ráfaga producen un solo correo.
      *
      * Devuelve false si el correo no pudo enviarse (SMTP caído, credenciales
      * mal, límite alcanzado...), pero NO lanza excepción: el código ya quedó
@@ -31,6 +45,21 @@ class OtpService
      */
     public function send(string $email, string $purpose): bool
     {
+        $enRafaga = EmailOtp::where('email', $email)
+            ->where('purpose', $purpose)
+            ->whereNull('consumed_at')
+            ->where('created_at', '>=', now()->subSeconds(self::IDEMPOTENCY_SECONDS))
+            ->exists();
+
+        if ($enRafaga) {
+            Log::info('Envío de código OTP omitido por ráfaga', [
+                'purpose' => $purpose,
+                'email' => $email,
+            ]);
+
+            return true;
+        }
+
         $this->clear($email, $purpose);
 
         $code = $this->generateCode();
@@ -60,6 +89,11 @@ class OtpService
 
             return false;
         }
+
+        Log::info('Código OTP enviado', [
+            'purpose' => $purpose,
+            'email' => $email,
+        ]);
 
         return true;
     }
