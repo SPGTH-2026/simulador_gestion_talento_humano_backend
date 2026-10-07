@@ -13,6 +13,14 @@ class DatabaseSeeder extends Seeder
 
     public function run(): void
     {
+        // Producción no se siembra: las cuentas de demo nunca deben existir en un
+        // despliegue real. Allí el super admin se crea con `php artisan app:make-admin`.
+        if (app()->environment('production')) {
+            $this->components->info('DatabaseSeeder omitido en producción. Usa app:make-admin.');
+
+            return;
+        }
+
         // Contraseña solo para desarrollo. Se puede cambiar con SEED_PASSWORD en el .env local.
         // No hace falta Hash::make: el cast 'password' => 'hashed' del modelo la hashea solo.
         $password = env('SEED_PASSWORD', 'Dev12345');
@@ -89,5 +97,9 @@ class DatabaseSeeder extends Seeder
                 'email_verified_at' => now(),
             ]);
         }
+
+        // Las fichas de demo se crean después: necesitan que los usuarios existan
+        // para ligar al instructor por el pivot y a los aprendices por ficha_id.
+        $this->call(FichaSeeder::class);
     }
 }

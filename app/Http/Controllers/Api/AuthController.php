@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Enums\Role;
 use App\Http\Controllers\Controller;
+use App\Models\Ficha;
 use App\Models\User;
 use App\Services\OtpService;
 use Illuminate\Http\JsonResponse;
@@ -22,7 +23,18 @@ class AuthController extends Controller
             'name' => ['required', 'string', 'max:120'],
             'email' => ['required', 'email', 'max:190', 'unique:users,email'],
             'password' => ['required', Password::min(8)->letters()->numbers()],
+            // Opcional: el aspirante puede dejar su ficha. Se valida que exista.
+            'ficha_codigo' => ['nullable', 'string', 'max:50'],
         ]);
+
+        $ficha = null;
+        if (($data['ficha_codigo'] ?? '') !== '') {
+            $ficha = Ficha::where('codigo', $data['ficha_codigo'])->first();
+
+            if (! $ficha) {
+                throw ValidationException::withMessages(['ficha_codigo' => 'La ficha no existe']);
+            }
+        }
 
         // Todo registro público es Aspirante; el rol nunca viene del request.
         $user = User::forceCreate([
@@ -31,6 +43,7 @@ class AuthController extends Controller
             'password' => $data['password'],
             'role' => Role::Aspirante,
             'active' => true,
+            'ficha_id' => $ficha?->id,
         ]);
 
         // No se abre sesión aquí: el flujo es registrarse, ir a la pantalla de
@@ -58,6 +71,34 @@ class AuthController extends Controller
         // Sesión (cookie HttpOnly) en lugar de token Bearer.
         Auth::guard('web')->login($user);
         $request->session()->regenerate();
+
+        return response()->json($this->body($user, null, null));
+    }
+
+    /** Exige el correo verificado: es lógica de negocio, no de autenticación. */
+    public function guardarFicha(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        // Solo el aspirante se auto-asocia a una ficha; instructor y super admin
+        // no pertenecen a ninguna, y el aprendiz ya tiene ficha (la asigna el instructor).
+        if ($user->role !== Role::Aspirante) {
+            throw ValidationException::withMessages(['ficha_codigo' => 'Tu cuenta ya tiene una ficha asignada']);
+        }
+
+        $data = $request->validate([
+            'ficha_codigo' => ['required', 'string', 'max:50'],
+        ]);
+
+        $ficha = Ficha::where('codigo', $data['ficha_codigo'])->first();
+
+        if (! $ficha) {
+            throw ValidationException::withMessages(['ficha_codigo' => 'La ficha no existe']);
+        }
+
+        // Asociar la ficha NO cambia el rol: el aspirante la deja registrada y
+        // el instructor lo convierte en aprendiz desde Usuarios.
+        $user->forceFill(['ficha_id' => $ficha->id])->save();
 
         return response()->json($this->body($user, null, null));
     }
@@ -190,6 +231,16 @@ class AuthController extends Controller
                 'subrole' => $user->subrole,
                 'email_verified' => (bool) $user->email_verified_at,
                 'permissions' => $user->permissions(),
+                // Ficha del usuario (aprendices/aspirantes) y alcance del que
+                // gestiona (instructores: las suyas; super admin: todas).
+                'ficha' => $user->ficha_id
+                    ? [
+                        'id' => $user->ficha_id,
+                        'codigo' => $user->ficha?->codigo,
+                        'nombre_programa' => $user->ficha?->nombre_programa,
+                    ]
+                    : null,
+                'ficha_ids' => $user->fichaIds(),
             ],
         ];
 

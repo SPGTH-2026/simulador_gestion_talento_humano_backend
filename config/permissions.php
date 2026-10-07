@@ -13,9 +13,11 @@ return [
     ],
 
     // Permisos EXCLUSIVOS del super admin. El instructor tiene todo lo demás
-    // (incluido propio:* y convocatorias:postular): es el administrador del flujo académico.
+    // (incluido usuarios:gestionar, propio:* y convocatorias:postular): es el
+    // administrador de las personas de sus fichas, pero la supervisión global
+    // (ver todo en todas las fichas) queda solo para el super admin.
     'super_admin_only' => [
-        'usuarios:gestionar', 'supervision:gestionar',
+        'supervision:gestionar',
     ],
 
     'aspirante' => [

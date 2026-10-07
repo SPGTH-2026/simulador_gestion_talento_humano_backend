@@ -6,7 +6,6 @@ use App\Enums\Role;
 use App\Http\Controllers\Controller;
 use App\Models\SocialAccount;
 use App\Models\User;
-use App\Services\OtpService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -51,12 +50,16 @@ class SocialAuthController extends Controller
                 return redirect("$front/login?error=correo_en_uso");
             }
 
+            // Google ya confirma el correo, así que se crea verificado y NO se
+            // pide OTP. El rol inicial es aspirante; el instructor lo ubica en
+            // su ficha y le asigna el rol después.
             $user = User::forceCreate([
                 'name' => $social->getName() ?: ($social->getNickname() ?: $social->getEmail()),
                 'email' => $social->getEmail(),
                 'password' => Str::random(40), // no se usa; la cuenta entra por el proveedor
                 'role' => Role::Aspirante,     // el rol NUNCA viene del proveedor
                 'active' => true,
+                'email_verified_at' => now(),
             ]);
             $user->socialAccounts()->create(['provider' => $provider, 'provider_id' => (string) $social->getId()]);
         }
@@ -65,16 +68,16 @@ class SocialAuthController extends Controller
             return redirect("$front/login?error=desactivado");
         }
 
+        // Google ya confirmó el correo: se marca como verificado (también
+        // rescata a cuentas creadas por callbacks antiguos que quedaron en
+        // 'null') y logueo directo, sin OTP por volver a entrar.
+        $user->forceFill(['email_verified_at' => now()])->save();
+
         // Sesión con cookie, igual que login(): el token ya no viaja en la URL.
         Auth::guard('web')->login($user);
         $request->session()->regenerate();
 
-        // Google confirma el correo, pero no es garantía de que esté en OUR sistema:
-        // la dirección pudo cambiar en Google o estar mal escrita. Por eso se exige
-        // el OTP también para cuentas de Google.
-        $user->forceFill(['email_verified_at' => null])->save();
-        app(OtpService::class)->send($user->email, OtpService::VERIFY_EMAIL);
-
-        return redirect("$front/verificar-correo");
+        // El front decide qué hacer según el perfil (ej. completar la ficha).
+        return redirect($front);
     }
 }
