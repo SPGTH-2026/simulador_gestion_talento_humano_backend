@@ -83,16 +83,16 @@ php artisan test
 
 ## Qué hace este backend
 
-**Ahora mismo, solo autenticación.** Las 10 rutas que expone son de login, registro,
-verificación de correo y recuperación de contraseña.
+**Ahora mismo, autenticación y ficha.** Las 11 rutas que expone son de login, registro,
+verificación de correo, recuperación de contraseña y asociación de la ficha del aspirante.
 
 Los roles y permisos ya están definidos (4 roles, 5 subroles, 18 permisos), pero **todavía no
 hay rutas de negocio** que los usen. Está anotado en [Pendientes](docs/13-pendientes.md).
 
-## Las 10 rutas
+## Las 11 rutas
 
 ```
-POST   /api/auth/register                     registrarse
+POST   /api/auth/register                     registrarse (ficha opcional)
 POST   /api/auth/login                        iniciar sesión
 POST   /api/auth/forgot-password              pedir código de recuperación
 POST   /api/auth/reset-password               cambiar la contraseña
@@ -102,6 +102,7 @@ GET    /api/auth/me                           quién soy
 POST   /api/auth/logout                       cerrar sesión
 POST   /api/auth/verification/send            reenviar el código
 POST   /api/auth/verification/confirm         confirmar el código
+POST   /api/auth/ficha                        aspirante: validar y asociar su ficha
 ```
 
 Detalle en [Autenticación](docs/05-autenticacion.md).
@@ -166,10 +167,10 @@ app/
 ├── Providers/                ← AppServiceProvider (permisos, rate limits)
 config/                       ← permisos, cors, sanctum
 database/
-├── migrations/               ← 6 archivos, 11 tablas
-└── seeders/                  ← DatabaseSeeder, DemoUsersSeeder
-routes/api.php                ← las 10 rutas
-tests/Feature/                ← 27 pruebas + 1 unitaria = 28 en total
+├── migrations/               ← 8 archivos, 14 tablas
+└── seeders/                  ← DatabaseSeeder, FichaSeeder (DemoUsersSeeder se fusionó aquí)
+routes/api.php                ← las 11 rutas de auth + 3 de usuarios
+tests/Feature/                ← 54 pruebas en total
 docs/                         ← esta documentación
 ```
 

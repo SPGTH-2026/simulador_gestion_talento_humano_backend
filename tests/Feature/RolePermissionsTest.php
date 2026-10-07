@@ -34,7 +34,9 @@ class RolePermissionsTest extends TestCase
     {
         $u = $this->usuario(Role::Instructor);
 
-        $this->assertNotContains('usuarios:gestionar', $u->permissions());
+        // Usuarios:gestionar ahora es del instructor (ver config/permissions.php);
+        // supervision:gestionar sigue siendo exclusivo del super admin.
+        $this->assertContains('usuarios:gestionar', $u->permissions());
         $this->assertNotContains('supervision:gestionar', $u->permissions());
 
         // Todo lo demas si.

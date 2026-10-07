@@ -1,7 +1,7 @@
 <?php
 
 // Prueba del callback de Google SIN red: se falsea Socialite y se verifica que
-// la ruta abre sesión con cookie y manda OTP (nunca un token en la URL).
+// la ruta abre sesión con cookie y NO manda OTP (Google ya confirma el correo).
 
 namespace App\Tests\Feature;
 
@@ -41,7 +41,7 @@ class SocialCallbackSessionTest extends TestCase
         Socialite::shouldReceive('driver')->andReturn($provider);
     }
 
-    public function test_callback_google_abre_sesion_y_manda_otp(): void
+    public function test_callback_google_nuevo_crea_aspirante_verificado_sin_otp(): void
     {
         $this->fakeSocialite();
 
@@ -55,22 +55,19 @@ class SocialCallbackSessionTest extends TestCase
         $this->assertStringNotContainsString('token', $url);
         $this->assertStringNotContainsString('#', $url);
 
-        // 2. Redirige a la pantalla de verificación.
-        $this->assertStringEndsWith('/verificar-correo', $url);
+        // 2. Redirige al inicio del front, no a la verificación.
+        $this->assertSame(config('app.frontend_url'), $url);
 
-        // 3. Se creó el usuario y la cuenta social.
+        // 3. Se creó el usuario, la cuenta social y quedó verificado.
         $user = User::where('email', 'ana.'.getmypid().'@test.com')->first();
         $this->assertNotNull($user);
         $this->assertSame(Role::Aspirante, $user->role);
+        $this->assertNotNull($user->email_verified_at);
 
-        // 4. Google NO marca el correo como verificado en nuestro sistema.
-        $this->assertNull($user->email_verified_at);
-
-        // 5. Se generó el OTP de verificación.
-        $this->assertDatabaseHas('email_otps', [
+        // 4. NO se generó OTP: Google ya confirmó el correo.
+        $this->assertDatabaseMissing('email_otps', [
             'email' => $user->email,
             'purpose' => OtpService::VERIFY_EMAIL,
-            'consumed_at' => null,
         ]);
     }
 
@@ -90,9 +87,12 @@ class SocialCallbackSessionTest extends TestCase
         $this->assertGuest();
     }
 
-    public function test_cuenta_google_existente_reutiliza_el_usuario(): void
+    public function test_cuenta_google_existente_reutiliza_usuario_sin_otp(): void
     {
-        $user = User::factory()->create(['email' => 'ana.'.getmypid().'@test.com']);
+        $user = User::factory()->create([
+            'email' => 'ana.'.getmypid().'@test.com',
+            'email_verified_at' => now(),
+        ]);
         SocialAccount::forceCreate([
             'user_id' => $user->id,
             'provider' => 'google',
@@ -105,11 +105,17 @@ class SocialCallbackSessionTest extends TestCase
 
         $response->assertRedirect();
 
+        // Va directo al inicio del front.
+        $this->assertSame(config('app.frontend_url'), $response->headers->get('Location'));
+
         $this->assertAuthenticatedAs($user);
 
-        // Sigue exigiendo verificación por OTP.
-        $this->assertNull($user->fresh()->email_verified_at);
-        $this->assertDatabaseHas('email_otps', [
+        // Se reutilizó la misma cuenta y el correo sigue verificado.
+        $this->assertSame($user->id, User::where('email', $user->email)->first()->id);
+        $this->assertNotNull($user->fresh()->email_verified_at);
+
+        // Sin OTP: Google ya verificó el correo.
+        $this->assertDatabaseMissing('email_otps', [
             'email' => $user->email,
             'purpose' => OtpService::VERIFY_EMAIL,
         ]);

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\SocialAuthController;
+use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
@@ -25,7 +26,20 @@ Route::prefix('auth')->group(function () {
         // Confirmar correo: requieren sesión pero NO 'verified' (si no, no se podría confirmar).
         Route::post('verification/send', [AuthController::class, 'sendVerification'])->middleware('throttle:otp-send');
         Route::post('verification/confirm', [AuthController::class, 'confirmVerification'])->middleware('throttle:otp-check');
+
+        // El aspirante se asocia a su ficha (Google o registro por correo).
+        // Exige correo verificado: es una acción de negocio, no de autenticación.
+        Route::middleware('verified')->post('ficha', [AuthController::class, 'guardarFicha']);
     });
+});
+
+// ── Usuarios y fichas ──────────────────────────────────────────────────
+// Lo tienen el super admin y el instructor (usuarios:gestionar). 'verified'
+// exige correo confirmado, igual que el resto de rutas de negocio.
+Route::middleware(['auth:sanctum', 'verified', 'can:usuarios:gestionar'])->group(function () {
+    Route::get('usuarios', [UserController::class, 'index']);
+    Route::patch('usuarios/{user}', [UserController::class, 'update']);
+    Route::get('fichas', [UserController::class, 'fichas']);
 });
 
 // ── Ejemplo: cada ruta de negocio declara el permiso que exige (403 si el rol no lo tiene) ──
