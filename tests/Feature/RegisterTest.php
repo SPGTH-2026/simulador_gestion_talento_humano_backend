@@ -1,7 +1,8 @@
 <?php
 
-// Registro público: crea un Aspirante activo y NO abre sesión. El flujo es
-// registrarse -> ir a iniciar sesión -> entrar con correo y contraseña -> OTP.
+// Registro público: crea un Aspirante activo y ABRE sesión. El flujo es
+// registrarse -> la sesión sin correo verificado cae en /verificar-correo
+// (desde ahí se envía el OTP). Los de Google no pasan por aquí: van verificados.
 
 namespace App\Tests\Feature;
 
@@ -15,7 +16,7 @@ class RegisterTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_registro_crea_aspirante_activo_y_sin_sesion(): void
+    public function test_registro_crea_aspirante_activo_con_sesion(): void
     {
         $response = $this->postJson('/api/auth/register', [
             'name' => 'Nuevo Aspirante',
@@ -34,8 +35,9 @@ class RegisterTest extends TestCase
         $this->assertTrue($user->active);
         $this->assertTrue(Hash::check('Clave12345', $user->password));
 
-        // El registro no debe dejar al usuario autenticado.
-        $this->assertGuest();
+        // El registro abre sesión: así el front cae en /verificar-correo (OTP)
+        // sin pasar por el login.
+        $this->assertAuthenticatedAs($user);
     }
 
     public function test_no_acepta_correo_duplicado(): void

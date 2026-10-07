@@ -46,9 +46,13 @@ class AuthController extends Controller
             'ficha_id' => $ficha?->id,
         ]);
 
-        // No se abre sesión aquí: el flujo es registrarse, ir a la pantalla de
-        // inicio de sesión y entrar con correo y contraseña. La verificación
-        // por OTP ocurre después del login.
+        // Se abre sesión igual que en login(): al crear la cuenta con correo
+        // y contraseña se va directo a la verificación por OTP (el correo aún
+        // no está confirmado). Los de Google no pasan por aquí: ya van
+        // verificados por el propio Google.
+        Auth::guard('web')->login($user);
+        $request->session()->regenerate();
+
         return response()->json($this->body($user, null, null), 201);
     }
 
