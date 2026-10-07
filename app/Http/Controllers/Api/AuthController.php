@@ -23,17 +23,15 @@ class AuthController extends Controller
             'name' => ['required', 'string', 'max:120'],
             'email' => ['required', 'email', 'max:190', 'unique:users,email'],
             'password' => ['required', Password::min(8)->letters()->numbers()],
-            // Opcional: el aspirante puede dejar su ficha. Se valida que exista.
-            'ficha_codigo' => ['nullable', 'string', 'max:50'],
+            // Obligatoria: el aspirante la deja al crear la cuenta, así tras el
+            // OTP no hay que pedirla de nuevo. Se valida que exista en la BD.
+            'ficha_codigo' => ['required', 'string', 'max:50'],
         ]);
 
-        $ficha = null;
-        if (($data['ficha_codigo'] ?? '') !== '') {
-            $ficha = Ficha::where('codigo', $data['ficha_codigo'])->first();
+        $ficha = Ficha::where('codigo', $data['ficha_codigo'])->first();
 
-            if (! $ficha) {
-                throw ValidationException::withMessages(['ficha_codigo' => 'La ficha no existe']);
-            }
+        if (! $ficha) {
+            throw ValidationException::withMessages(['ficha_codigo' => 'La ficha no existe']);
         }
 
         // Todo registro público es Aspirante; el rol nunca viene del request.
@@ -43,7 +41,7 @@ class AuthController extends Controller
             'password' => $data['password'],
             'role' => Role::Aspirante,
             'active' => true,
-            'ficha_id' => $ficha?->id,
+            'ficha_id' => $ficha->id,
         ]);
 
         // Se abre sesión igual que en login(): al crear la cuenta con correo

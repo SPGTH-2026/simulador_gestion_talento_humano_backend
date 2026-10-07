@@ -1,8 +1,8 @@
 <?php
 
-// La ficha del aspirante: se valida que exista al registrarse (opcional) y se
-// puede asociar después con POST /api/auth/ficha. Asociar la ficha NO cambia el
-// rol: el instructor lo convierte en aprendiz desde Usuarios.
+// La ficha del aspirante: es OBLIGATORIA al registrarse (se valida que exista en
+// la BD). /api/auth/ficha existe solo para quien entró por Google, que no pudo
+// escribirla en el formulario. Asociar la ficha NO cambia el rol.
 
 namespace App\Tests\Feature;
 
@@ -30,18 +30,7 @@ class FichaAspiranteTest extends TestCase
         ]);
     }
 
-    // ── Registro con ficha (opcional) ──────────────────────────────────
-
-    public function test_registro_sin_ficha_deja_el_aspirante_libre(): void
-    {
-        $this->postJson('/api/auth/register', [
-            'name' => 'Nuevo Aspirante',
-            'email' => 'nuevo@test.com',
-            'password' => 'Clave12345',
-        ])->assertStatus(201)->assertJsonPath('user.ficha', null);
-
-        $this->assertDatabaseHas('users', ['email' => 'nuevo@test.com', 'ficha_id' => null]);
-    }
+    // ── Registro con ficha obligatoria ────────────────────────────────
 
     public function test_registro_con_ficha_valida_la_asocia(): void
     {
