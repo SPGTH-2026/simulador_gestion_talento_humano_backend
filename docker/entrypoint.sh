@@ -30,6 +30,13 @@ if [ "${SKIP_MIGRATIONS:-false}" != "true" ]; then
   php artisan migrate --force
 fi
 
+# La ficha 3173334 es parte del dominio, no datos demo: se siembra en CADA
+# arranque porque FichaSeeder es idempotente (firstOrCreate) y así queda
+# garantizada en producción sin depender de seeds manuales.
+if [ "${SKIP_MIGRATIONS:-false}" != "true" ]; then
+  php artisan db:seed --class=FichaSeeder --force
+fi
+
 # Seed solo si se pide explícito (las cuentas demo no van a prod por defecto).
 if [ "${RUN_SEEDERS:-false}" = "true" ]; then
   php artisan db:seed --force
