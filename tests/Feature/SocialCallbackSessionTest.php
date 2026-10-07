@@ -71,20 +71,35 @@ class SocialCallbackSessionTest extends TestCase
         ]);
     }
 
-    public function test_no_se_vincula_por_correo_a_cuenta_existente(): void
+    public function test_cuenta_existente_por_correo_se_enlaza_y_conserva_el_rol(): void
     {
-        // Ya existe un usuario con ese correo, pero sin cuenta social vinculada.
-        User::factory()->create(['email' => 'ana.'.getmypid().'@test.com']);
+        // Ya existe un usuario con ese correo (p. ej. el super admin creado con
+        // app:make-admin), pero sin cuenta social vinculada. Al colisionar el
+        // correo de Google (ya verificado) se enlaza a ESE usuario: no se crea
+        // otro y el rol no se pierde.
+        $admin = User::factory()->create([
+            'email' => 'ana.'.getmypid().'@test.com',
+            'role' => Role::SuperAdmin,
+            'email_verified_at' => now(),
+        ]);
 
         $this->fakeSocialite();
 
         $response = $this->get('/api/auth/google/callback');
 
         $response->assertRedirect();
-        $this->assertStringContainsString('error=correo_en_uso', $response->headers->get('Location'));
+        $this->assertSame(config('app.frontend_url'), $response->headers->get('Location'));
 
-        // No se creó una sesión para la cuenta existente.
-        $this->assertGuest();
+        // Mismo usuario, mismo rol, sin duplicados y con cuenta social enlazada.
+        $this->assertSame($admin->id, $admin->fresh()->id);
+        $this->assertSame(Role::SuperAdmin, $admin->fresh()->role);
+        $this->assertSame(1, User::where('email', $admin->email)->count());
+        $this->assertDatabaseHas('social_accounts', [
+            'user_id' => $admin->id,
+            'provider' => 'google',
+            'provider_id' => 'google-abc123',
+        ]);
+        $this->assertAuthenticatedAs($admin);
     }
 
     public function test_cuenta_google_existente_reutiliza_usuario_sin_otp(): void

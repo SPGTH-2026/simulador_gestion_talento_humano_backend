@@ -45,22 +45,28 @@ class SocialAuthController extends Controller
             if (! $social->getEmail()) {
                 return redirect("$front/login?error=sin_correo");
             }
-            // No se vincula por correo a cuentas existentes: evita que alguien tome una cuenta ajena.
-            if (User::where('email', $social->getEmail())->exists()) {
-                return redirect("$front/login?error=correo_en_uso");
+
+            // Google ya confirmó que el correo pertenece a quien entra, así que si
+            // existe un usuario con ese correo (ej. el super admin creado con
+            // app:make-admin) se le enlaza esta cuenta social en lugar de crear
+            // otro usuario. Así "Entrar con Google" reconoce al mismo dueño y
+            // conserva su rol; el rol nunca se toma del proveedor.
+            $user = User::where('email', $social->getEmail())->first();
+
+            if (! $user) {
+                // Aspirante nuevo: se crea verificado (Google confirmó el correo)
+                // y sin OTP. El rol inicial es aspirante; el instructor lo ubica
+                // en su ficha y le asigna el rol después.
+                $user = User::forceCreate([
+                    'name' => $social->getName() ?: ($social->getNickname() ?: $social->getEmail()),
+                    'email' => $social->getEmail(),
+                    'password' => Str::random(40), // no se usa; la cuenta entra por el proveedor
+                    'role' => Role::Aspirante,     // el rol NUNCA viene del proveedor
+                    'active' => true,
+                    'email_verified_at' => now(),
+                ]);
             }
 
-            // Google ya confirma el correo, así que se crea verificado y NO se
-            // pide OTP. El rol inicial es aspirante; el instructor lo ubica en
-            // su ficha y le asigna el rol después.
-            $user = User::forceCreate([
-                'name' => $social->getName() ?: ($social->getNickname() ?: $social->getEmail()),
-                'email' => $social->getEmail(),
-                'password' => Str::random(40), // no se usa; la cuenta entra por el proveedor
-                'role' => Role::Aspirante,     // el rol NUNCA viene del proveedor
-                'active' => true,
-                'email_verified_at' => now(),
-            ]);
             $user->socialAccounts()->create(['provider' => $provider, 'provider_id' => (string) $social->getId()]);
         }
 
