@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Enums\Role;
+use App\Models\Ficha;
 use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
@@ -101,5 +102,32 @@ class DatabaseSeeder extends Seeder
         // Las fichas de demo se crean después: necesitan que los usuarios existan
         // para ligar al instructor por el pivot y a los aprendices por ficha_id.
         $this->call(FichaSeeder::class);
+
+        // Liga los usuarios demo a la ficha base (solo local/no producción):
+        // aspirante y aprendices (incluido el gestor) por users.ficha_id; el
+        // instructor por el pivote ficha_instructor. Idempotente: no duplica ni
+        // pisa una ficha ya asignada.
+        $fichaDemo = Ficha::where('codigo', '3173334')->first();
+
+        if ($fichaDemo) {
+            User::whereIn('email', [
+                'aspirante@test.com',
+                'general@test.com',
+                'evaluador@test.com',
+                'seleccionador@test.com',
+                'revisor@test.com',
+                'gestor@test.com',
+            ])->whereNull('ficha_id')->update(['ficha_id' => $fichaDemo->id]);
+
+            $instructor = User::where('email', 'instructor@test.com')->first();
+
+            if ($instructor) {
+                $instructor->fichas()->syncWithoutDetaching([$fichaDemo->id]);
+            }
+        }
+
+        // Catálogo de parámetros del negocio (temas, estados, documentos, etc.).
+        // Idempotente: se puede correr varias veces sin duplicar.
+        $this->call(ParametroSeeder::class);
     }
 }

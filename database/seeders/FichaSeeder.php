@@ -9,16 +9,12 @@ class FichaSeeder extends Seeder
 {
     public function run(): void
     {
-        // Ficha única por el momento: el proyecto arranca solo con la de
-        // desarrolladores. firstOrCreate hace el seeder idempotente.
-        $ficha = Ficha::firstOrCreate(
+        // Ficha base del proyecto. El seeder SOLO la crea si no existe
+        // (firstOrCreate) y NUNCA borra fichas: el instructor podrá crear más
+        // fichas desde la aplicación y un despliegue no debe eliminarlas.
+        Ficha::firstOrCreate(
             ['codigo' => '3173334'],
             ['nombre_programa' => 'ADSO DESARROLLADORES']
         );
-
-        // "Solo la ficha de desarrolladores": elimina cualquier otra ficha que
-        // quede de seeds demo previos. Es seguro: ficha_instructor borra en
-        // cascada y users.ficha_id queda NULL (nullOnDelete).
-        Ficha::where('id', '!=', $ficha->id)->delete();
     }
 }

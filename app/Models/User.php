@@ -55,6 +55,9 @@ class User extends Authenticatable implements MustVerifyEmail
      * admin (todas) el resto ve únicamente lo suyo. Todo endpoint de negocio
      * debe filtrar por esta lista: es la regla de aislamiento entre fichas.
      *
+     * El instructor se liga por el pivot ficha_instructor; el aspirante y el
+     * aprendiz llevan su ficha en users.ficha_id, así que esa también cuenta.
+     *
      * @return array<int>
      */
     public function fichaIds(): array
@@ -63,7 +66,10 @@ class User extends Authenticatable implements MustVerifyEmail
             return Ficha::query()->pluck('id')->all();
         }
 
-        return $this->fichas()->pluck('fichas.id')->all();
+        return array_values(array_unique(array_merge(
+            $this->fichas()->pluck('fichas.id')->all(),
+            $this->ficha_id ? [$this->ficha_id] : [],
+        )));
     }
 
     /** @return string[] */
