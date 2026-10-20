@@ -482,7 +482,7 @@ class PostulacionSkillTest extends TestCase
         $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['nombre' => 'Excel'])
             ->assertStatus(422)
-            ->assertJsonPath('errors.skills.0', 'Tu postulación está retirada. Reactívala para subir documentos.');
+            ->assertJsonPath('errors.skills.0', 'Tu postulación está retirada. Reactívala para editar documentos.');
     }
 
     public function test_revisor_puede_descargar_el_certificado(): void

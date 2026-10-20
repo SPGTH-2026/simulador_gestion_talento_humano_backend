@@ -27,40 +27,107 @@ trait GestionaPostulacionPropia
     }
 
     /**
-     * Solo se editan documentos/skills con la convocatoria publicada y dentro de
-     * la ventana, y con la postulación en 'borrador' (antes de enviar) o
-     * 'postulada' (después de enviar). Una 'retirada' queda bloqueada hasta
-     * reabrirla. La clave decide bajo qué campo viaja el error 422.
+     * Determina si la postulación es editable según las reglas de negocio:
+     * - Borrador: solo dentro de la ventana de recepción (apertura..cierre).
+     * - Postulada: convocatoria publicada, después de apertura, y antes de fecha_evaluacion (si existe).
+     * - Retirada: nunca editable.
+     * - Convocatoria no publicada: no editable (404 en exigirEditable).
+     */
+    private function puedeEditar(Postulacion $postulacion): bool
+    {
+        $postulacion->loadMissing(['convocatoria.estado', 'estado']);
+        $convocatoria = $postulacion->convocatoria;
+        $hoy = now('America/Bogota')->toDateString();
+
+        if ($convocatoria->estado?->codigo !== 'publicada') {
+            return false;
+        }
+
+        if ($convocatoria->fecha_apertura && $hoy < $convocatoria->fecha_apertura->toDateString()) {
+            return false;
+        }
+
+        $codigo = $postulacion->estado?->codigo;
+
+        if ($codigo === PostulacionEstado::Borrador->value) {
+            return $convocatoria->ventanaPostulacion() === VentanaPostulacion::Abierta;
+        }
+
+        if ($codigo !== PostulacionEstado::Postulada->value) {
+            return false;
+        }
+
+        return $convocatoria->fecha_evaluacion === null
+            || $hoy < $convocatoria->fecha_evaluacion->toDateString();
+    }
+
+    /**
+     * Devuelve el motivo legible de por qué no es editable (string vacío si sí lo es).
+     */
+    private function motivoNoEditable(Postulacion $postulacion): string
+    {
+        $postulacion->loadMissing(['convocatoria.estado', 'estado']);
+        $convocatoria = $postulacion->convocatoria;
+        $hoy = now('America/Bogota')->toDateString();
+
+        if ($convocatoria->estado?->codigo !== 'publicada') {
+            return 'La convocatoria no está publicada.';
+        }
+
+        if ($convocatoria->fecha_apertura && $hoy < $convocatoria->fecha_apertura->toDateString()) {
+            return 'La convocatoria aún no está abierta. Abre el '
+                .$convocatoria->fecha_apertura?->toDateString().'.';
+        }
+
+        $codigo = $postulacion->estado?->codigo;
+
+        if ($codigo === PostulacionEstado::Retirada->value) {
+            return 'Tu postulación está retirada. Reactívala para editar documentos.';
+        }
+
+        if ($codigo === PostulacionEstado::Borrador->value) {
+            if ($convocatoria->ventanaPostulacion() !== VentanaPostulacion::Abierta) {
+                return 'La convocatoria ya cerró el '
+                    .$convocatoria->fecha_cierre?->toDateString()
+                    .'. Los borradores no se editan fuera de la ventana.';
+            }
+            return '';
+        }
+
+        if ($codigo !== PostulacionEstado::Postulada->value) {
+            return 'Esta postulación no está en estado editable.';
+        }
+
+        if ($convocatoria->fecha_evaluacion && $hoy >= $convocatoria->fecha_evaluacion->toDateString()) {
+            return 'La evaluación ya comenzó el '
+                .$convocatoria->fecha_evaluacion->toDateString()
+                .'. Los documentos quedaron solo para consulta.';
+        }
+
+        return '';
+    }
+
+    /**
+     * Exige que la postulación sea editable; lanza ValidationException con el motivo
+     * o abort(404) si la convocatoria no está publicada.
      */
     private function exigirEditable(Postulacion $postulacion, string $clave): void
     {
-        $convocatoria = $postulacion->convocatoria;
+        $motivo = $this->motivoNoEditable($postulacion);
 
-        switch ($convocatoria->ventanaPostulacion()) {
-            case VentanaPostulacion::NoPublicada:
-                abort(404, 'Postulación no encontrada.');
-
-            case VentanaPostulacion::AntesDeApertura:
-                throw ValidationException::withMessages([
-                    $clave => 'La convocatoria aún no está abierta. Abre el '
-                        .$convocatoria->fecha_apertura?->toDateString().'.',
-                ]);
-
-            case VentanaPostulacion::Cerrada:
-                throw ValidationException::withMessages([
-                    $clave => 'La convocatoria ya cerró el '
-                        .$convocatoria->fecha_cierre?->toDateString().'.',
-                ]);
+        if ($motivo === '') {
+            return;
         }
 
-        if (! in_array($postulacion->estado?->codigo, [
-            PostulacionEstado::Borrador->value,
-            PostulacionEstado::Postulada->value,
-        ], true)) {
-            throw ValidationException::withMessages([
-                $clave => 'Tu postulación está retirada. Reactívala para subir documentos.',
-            ]);
+        $postulacion->loadMissing(['convocatoria.estado']);
+
+        if ($postulacion->convocatoria->estado?->codigo !== 'publicada') {
+            abort(404, 'Postulación no encontrada.');
         }
+
+        throw ValidationException::withMessages([
+            $clave => $motivo,
+        ]);
     }
 
     /** Alcance por ficha para revisores: fuera de su ficha -> 404 (no revela). */
@@ -89,13 +156,13 @@ trait GestionaPostulacionPropia
     }
 
     /**
-     * Guarda el archivo en el disco configurado y devuelve sus metadatos.
+     * Guarda el archivo en el disco configurado (documentos_disk) y devuelve sus metadatos.
      *
      * @return array{nombre_original: string, ruta: string, disco: string, mime: string, tamano_bytes: int}
      */
     private function guardarArchivo(UploadedFile $archivo, string $carpeta): array
     {
-        $disco = config('filesystems.default');
+        $disco = config('filesystems.documentos_disk');
 
         return [
             'nombre_original' => $archivo->getClientOriginalName(),

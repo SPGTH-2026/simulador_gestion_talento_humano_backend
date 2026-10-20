@@ -218,13 +218,7 @@ class PostulacionDocumentoController extends Controller
 
     private function esEditable(Postulacion $postulacion): bool
     {
-        $postulacion->loadMissing('convocatoria.estado', 'estado');
-
-        return $postulacion->convocatoria->ventanaPostulacion() === VentanaPostulacion::Abierta
-            && in_array($postulacion->estado?->codigo, [
-                PostulacionEstado::Borrador->value,
-                PostulacionEstado::Postulada->value,
-            ], true);
+        return $this->puedeEditar($postulacion);
     }
 
     // ── Archivos ───────────────────────────────────────────────────────
@@ -315,6 +309,8 @@ class PostulacionDocumentoController extends Controller
             'convocatoria' => $this->convocatoriaResumen($postulacion->convocatoria),
             'ventana' => $postulacion->convocatoria->ventanaPostulacion()->value,
             'editable' => $editable,
+            'motivo_edicion' => $editable ? null : $this->motivoNoEditable($postulacion),
+            'fecha_evaluacion' => $postulacion->convocatoria->fecha_evaluacion?->toDateString(),
             'completo' => $completo,
             'requiere_sexo' => $requiereSexo,
             'sexo' => $perfil?->sexo
