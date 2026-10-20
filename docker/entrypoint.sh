@@ -35,10 +35,18 @@ fi
 # garantizada en producción sin depender de seeds manuales.
 if [ "${SKIP_MIGRATIONS:-false}" != "true" ]; then
   php artisan db:seed --class=FichaSeeder --force
-  # Catálogo de parámetros (10 temas / 52 valores). Idempotente (updateOrCreate),
-  # así que se siembra en CADA arranque para que los desplegables y filtros
-  # del módulo nunca queden vacíos ni devuelvan 500.
+fi
+
+# Catálogo de parámetros del negocio (idempotente, updateOrCreate). Necesario
+# para que la aplicación tenga estados, tipos, documentos, etc. desde el arranque.
+if [ "${SKIP_MIGRATIONS:-false}" != "true" ]; then
   php artisan db:seed --class=ParametroSeeder --force
+fi
+
+# Super admin garantizado del sistema: idempotente, asegura la cuenta con su
+# rol en CADA arranque. Lee credenciales de SUPER_ADMIN_EMAIL/PASSWORD.
+if [ "${SKIP_MIGRATIONS:-false}" != "true" ]; then
+  php artisan db:seed --class=SuperAdminSeeder --force
 fi
 
 # Seed solo si se pide explícito (las cuentas demo no van a prod por defecto).

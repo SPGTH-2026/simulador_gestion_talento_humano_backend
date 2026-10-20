@@ -58,12 +58,6 @@ class DatabaseSeeder extends Seeder
                 'subrole' => 'seleccionador',
             ],
             [
-                'name' => 'Aprendiz Revisor Documental Demo',
-                'email' => 'revisor@test.com',
-                'role' => Role::Aprendiz->value,
-                'subrole' => 'revisor_documental',
-            ],
-            [
                 'name' => 'Aprendiz Gestor Convocatorias Demo',
                 'email' => 'gestor@test.com',
                 'role' => Role::Aprendiz->value,
@@ -115,7 +109,6 @@ class DatabaseSeeder extends Seeder
                 'general@test.com',
                 'evaluador@test.com',
                 'seleccionador@test.com',
-                'revisor@test.com',
                 'gestor@test.com',
             ])->whereNull('ficha_id')->update(['ficha_id' => $fichaDemo->id]);
 

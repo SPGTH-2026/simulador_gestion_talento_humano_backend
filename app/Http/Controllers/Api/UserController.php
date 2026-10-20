@@ -17,12 +17,14 @@ class UserController extends Controller
     /**
      * Lista de usuarios, paginada. El super admin ve todo; el instructor ve
      * únicamente los usuarios de sus fichas más los aspirantes sin ficha
-     * (para poder traerlos a su grupo).
+     * (para poder traerlos a su grupo). Admite filtrar por rol (p. ej. el
+     * portafolio documental pide role=aspirante).
      */
     public function index(Request $request): JsonResponse
     {
         $datos = $request->validate([
             'ficha_id' => ['nullable', 'integer', 'exists:fichas,id'],
+            'role' => ['nullable', Rule::enum(Role::class)],
             'search' => ['nullable', 'string', 'max:120'],
         ]);
 
@@ -31,6 +33,10 @@ class UserController extends Controller
 
         if ($datos['ficha_id'] ?? null) {
             $query->where('ficha_id', $datos['ficha_id']);
+        }
+
+        if ($datos['role'] ?? null) {
+            $query->where('role', $datos['role']);
         }
 
         if ($datos['search'] ?? null) {
@@ -43,11 +49,19 @@ class UserController extends Controller
         // traerlos a su grupo). El super admin no tiene restricción de alcance.
         if ($actor->role !== Role::SuperAdmin) {
             $scope = $actor->fichaIds();
-            $query->where(function ($q) use ($scope) {
-                $q->where(function ($a) use ($scope) {
-                    $a->whereIn('ficha_id', $scope)->where('role', '!=', Role::Aspirante->value);
-                })->orWhere('role', Role::Aspirante->value);
-            });
+
+            // Con un rol explícito (p. ej. el portafolio pide solo aspirantes) el
+            // alcance se limita a las fichas del actor: así no se listan personas
+            // de las que luego no podría abrir el portafolio (daría 404).
+            if ($datos['role'] ?? null) {
+                $query->whereIn('ficha_id', $scope);
+            } else {
+                $query->where(function ($q) use ($scope) {
+                    $q->where(function ($a) use ($scope) {
+                        $a->whereIn('ficha_id', $scope)->where('role', '!=', Role::Aspirante->value);
+                    })->orWhere('role', Role::Aspirante->value);
+                });
+            }
         }
 
         $usuarios = $query->orderBy('role')->orderBy('name')->paginate(20);
@@ -107,7 +121,7 @@ class UserController extends Controller
         }
 
         // Solo los aprendices llevan subrol.
-        $subrolesAprendiz = ['general', 'evaluador', 'seleccionador', 'revisor_documental', 'gestor_convocatorias'];
+        $subrolesAprendiz = ['general', 'evaluador', 'seleccionador', 'gestor_convocatorias'];
         if ($datos['role'] === Role::Aprendiz->value) {
             if (! in_array($subrole, $subrolesAprendiz, true)) {
                 throw ValidationException::withMessages(['subrole' => 'Subrol inválido para el rol aprendiz']);

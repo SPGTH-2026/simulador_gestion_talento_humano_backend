@@ -33,7 +33,6 @@ class FichasDemoTest extends TestCase
             'general@test.com',
             'evaluador@test.com',
             'seleccionador@test.com',
-            'revisor@test.com',
             'gestor@test.com',
         ] as $email) {
             $this->assertSame(

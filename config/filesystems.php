@@ -15,6 +15,10 @@ return [
 
     'default' => env('FILESYSTEM_DISK', 'local'),
 
+    // Disco de la Gestión Documental: 'local' en desarrollo (storage/app/private),
+    // 'documentos' (S3/R2) en producción vía DOCUMENTOS_DISK.
+    'documentos_disk' => env('DOCUMENTOS_DISK', 'local'),
+
     /*
     |--------------------------------------------------------------------------
     | Filesystem Disks
@@ -56,6 +60,26 @@ return [
             'url' => env('AWS_URL'),
             'endpoint' => env('AWS_ENDPOINT'),
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+            'throw' => false,
+            'report' => false,
+        ],
+
+        // Gestión Documental. Driver S3 porque Cloudflare R2 implementa la API S3
+        // (Región 'auto', endpoint propio, path-style). En desarrollo se usa
+        // 'documentos_disk' = local y ni siquiera se necesita una cuenta R2.
+        'documentos' => [
+            'driver' => 's3',
+            'key' => env('R2_ACCESS_KEY_ID'),
+            'secret' => env('R2_SECRET_ACCESS_KEY'),
+            'region' => env('R2_REGION', 'auto'),
+            'bucket' => env('R2_BUCKET'),
+            'url' => env('R2_URL'),
+            'endpoint' => env('R2_ENDPOINT'),
+            'use_path_style_endpoint' => true,
+            // Bucket PRIVADO: los objetos nunca se sirven por URL pública. El
+            // acceso siempre pasa por el proxy del backend (descarga/ver), que
+            // es el único que conoce la clave del archivo.
+            'visibility' => 'private',
             'throw' => false,
             'report' => false,
         ],
