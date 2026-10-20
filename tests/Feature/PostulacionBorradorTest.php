@@ -74,7 +74,7 @@ class PostulacionBorradorTest extends TestCase
 
     private function revisor(Ficha $ficha): User
     {
-        return $this->usuario(Role::Aprendiz, ['subrole' => 'revisor_documental', 'ficha_id' => $ficha->id]);
+        return $this->instructor($ficha);
     }
 
     private function parametroId(string $tema, string $codigo): int

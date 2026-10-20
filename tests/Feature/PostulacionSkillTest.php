@@ -366,13 +366,10 @@ class PostulacionSkillTest extends TestCase
         $this->actingAs($aspirante)->postJson($url, ['parametro_id' => $this->parametroId('skill_catalogo', 'excel')])->assertCreated();
         $this->actingAs($aspirante)->postJson($url, ['nombre' => 'Pintura'])->assertCreated();
 
-        $revisor = $this->usuario(Role::Aprendiz, [
-            'subrole' => 'revisor_documental',
-            'ficha_id' => $aspirante->ficha_id,
-        ]);
+        $instructor = $this->instructor($aspirante->ficha);
 
         $skills = collect(
-            $this->actingAs($revisor)
+            $this->actingAs($instructor)
                 ->getJson("/api/revision/postulaciones/{$postulacion->id}/documentos")
                 ->assertOk()
                 ->json('data.skills')
@@ -501,18 +498,15 @@ class PostulacionSkillTest extends TestCase
                 'archivo' => $this->pdf('excel.pdf'),
             ])->assertOk();
 
-        $revisor = $this->usuario(Role::Aprendiz, [
-            'subrole' => 'revisor_documental',
-            'ficha_id' => $aspirante->ficha_id,
-        ]);
+        $instructor = $this->instructor($aspirante->ficha);
 
-        $this->actingAs($revisor)
+        $this->actingAs($instructor)
             ->get("/api/revision/postulaciones/{$postulacion->id}/skills/{$skill->id}/certificado/archivo")
             ->assertOk();
 
-        // Un revisor de otra ficha no puede: 404.
+        // Un instructor de otra ficha no puede: 404.
         $otraFicha = $this->ficha('9999999');
-        $ajeno = $this->usuario(Role::Aprendiz, ['subrole' => 'revisor_documental', 'ficha_id' => $otraFicha->id]);
+        $ajeno = $this->instructor($otraFicha);
 
         $this->actingAs($ajeno)
             ->get("/api/revision/postulaciones/{$postulacion->id}/skills/{$skill->id}/certificado/archivo")

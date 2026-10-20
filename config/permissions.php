@@ -5,7 +5,7 @@ return [
     'all' => [
         'dashboard:ver',
         'convocatorias:ver', 'convocatorias:gestionar', 'convocatorias:postular',
-        'documentos:ver', 'documentos:cargar', 'documentos:validar',
+        'documentos:ver',
         'evaluacion:ver', 'evaluacion:evaluar',
         'seleccion:ver', 'seleccion:decidir',
         'reportes:ver', 'supervision:gestionar', 'usuarios:gestionar',
@@ -29,12 +29,11 @@ return [
     'aprendiz' => [
         'general' => [
             'dashboard:ver', 'convocatorias:ver', 'convocatorias:gestionar',
-            'documentos:ver', 'documentos:cargar', 'documentos:validar',
+            'documentos:ver',
             'evaluacion:ver', 'evaluacion:evaluar', 'seleccion:ver', 'seleccion:decidir', 'reportes:ver',
         ],
         'evaluador' => ['dashboard:ver', 'documentos:ver', 'evaluacion:ver', 'evaluacion:evaluar', 'reportes:ver'],
         'seleccionador' => ['dashboard:ver', 'seleccion:ver', 'seleccion:decidir', 'reportes:ver'],
-        'revisor_documental' => ['dashboard:ver', 'documentos:ver', 'documentos:cargar', 'documentos:validar', 'reportes:ver'],
         'gestor_convocatorias' => ['dashboard:ver', 'convocatorias:ver', 'convocatorias:gestionar', 'reportes:ver'],
     ],
     // El super admin recibe 'all'; el instructor recibe 'all' menos lo exclusivo

@@ -643,12 +643,12 @@ class PostulacionDocumentoTest extends TestCase
 
     // ── Revisores (documentos:ver) ─────────────────────────────────────
 
-    public function test_revisor_de_la_misma_ficha_puede_leer(): void
+    public function test_instructor_de_la_misma_ficha_puede_leer(): void
     {
         [$aspirante, $postulacion] = $this->baseConDocumentos(['hoja_de_vida' => true]);
-        $revisor = $this->usuario(Role::Aprendiz, ['subrole' => 'revisor_documental', 'ficha_id' => $aspirante->ficha_id]);
+        $instructor = $this->instructor($aspirante->ficha);
 
-        $this->actingAs($revisor)
+        $this->actingAs($instructor)
             ->getJson("/api/revision/postulaciones/{$postulacion->id}/documentos")
             ->assertOk()
             ->assertJsonPath('data.editable', false)
@@ -665,13 +665,13 @@ class PostulacionDocumentoTest extends TestCase
             ->assertOk();
     }
 
-    public function test_revisor_de_otra_ficha_recibe_404(): void
+    public function test_instructor_de_otra_ficha_recibe_404(): void
     {
         [$aspirante, $postulacion] = $this->baseConDocumentos([]);
         $otraFicha = $this->ficha('9999999');
-        $revisor = $this->usuario(Role::Aprendiz, ['subrole' => 'revisor_documental', 'ficha_id' => $otraFicha->id]);
+        $instructor = $this->instructor($otraFicha);
 
-        $this->actingAs($revisor)
+        $this->actingAs($instructor)
             ->getJson("/api/revision/postulaciones/{$postulacion->id}/documentos")
             ->assertNotFound();
     }
@@ -702,9 +702,9 @@ class PostulacionDocumentoTest extends TestCase
         $convocatoria = $postulacion->convocatoria;
         $skill = ConvocatoriaSkill::create(['convocatoria_id' => $convocatoria->id, 'nombre' => 'SAP HR']);
 
-        $revisor = $this->usuario(Role::Aprendiz, ['subrole' => 'revisor_documental', 'ficha_id' => $aspirante->ficha_id]);
+        $instructor = $this->instructor($aspirante->ficha);
 
-        $respuesta = $this->actingAs($revisor)
+        $respuesta = $this->actingAs($instructor)
             ->getJson("/api/revision/postulaciones/{$postulacion->id}/documentos")
             ->assertOk();
 
