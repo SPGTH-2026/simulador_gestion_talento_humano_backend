@@ -178,18 +178,23 @@ trait GestionaPostulacionPropia
     private function guardarArchivo(UploadedFile $archivo, string $carpeta): array
     {
         $disco = (string) config('filesystems.documentos_disk');
+        $motivo = null;
 
         try {
             $ruta = $archivo->store($carpeta, $disco);
         } catch (\Throwable $e) {
             report($e);
             $ruta = false;
+            // El motivo real (endpoint, credenciales, bucket) queda en la misma
+            // línea del log, para verlo sin buscar la excepción completa.
+            $motivo = $e::class.': '.$e->getMessage();
         }
 
         if ($ruta === false || $ruta === '') {
             Log::error('No se pudo guardar el archivo en el disco de documentos.', [
                 'disco' => $disco,
                 'carpeta' => $carpeta,
+                'motivo' => $motivo ?? 'store() devolvió vacío sin excepción',
             ]);
 
             throw ValidationException::withMessages([
