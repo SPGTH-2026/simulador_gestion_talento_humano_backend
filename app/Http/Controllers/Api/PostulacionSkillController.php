@@ -209,20 +209,20 @@ class PostulacionSkillController extends Controller
         return response()->json(null, 204);
     }
 
-    /** Descarga del certificado (dueño). */
+    /** Entrega el certificado (dueño). Por defecto attachment; ?inline=1 lo deja en la pestaña. */
     public function certificadoArchivo(Request $request, Postulacion $postulacion, PostulacionSkill $skill): Response
     {
         $this->exigirPropia($request, $postulacion);
 
-        return $this->descargarCertificado($postulacion, $skill);
+        return $this->descargarCertificado($postulacion, $skill, $request->boolean('inline'));
     }
 
-    /** Descarga del certificado (revisor con 'documentos:ver'). */
+    /** Entrega el certificado (revisor con 'documentos:ver'). Igual que certificadoArchivo(): ?inline=1. */
     public function certificadoRevision(Request $request, Postulacion $postulacion, PostulacionSkill $skill): Response
     {
         $this->exigirRevision($request, $postulacion);
 
-        return $this->descargarCertificado($postulacion, $skill);
+        return $this->descargarCertificado($postulacion, $skill, $request->boolean('inline'));
     }
 
     private function exigirSkillDeLaPostulacion(Postulacion $postulacion, PostulacionSkill $skill): void
@@ -232,7 +232,7 @@ class PostulacionSkillController extends Controller
         }
     }
 
-    private function descargarCertificado(Postulacion $postulacion, PostulacionSkill $skill): Response
+    private function descargarCertificado(Postulacion $postulacion, PostulacionSkill $skill, bool $inline = false): Response
     {
         $this->exigirSkillDeLaPostulacion($postulacion, $skill);
 
@@ -244,6 +244,10 @@ class PostulacionSkillController extends Controller
 
         if (! $disco->exists($skill->certificado_ruta)) {
             abort(404, 'Certificado no encontrado.');
+        }
+
+        if ($inline) {
+            return $disco->response($skill->certificado_ruta, $skill->certificado_nombre_original);
         }
 
         return $disco->download($skill->certificado_ruta, $skill->certificado_nombre_original);
