@@ -513,6 +513,54 @@ class PostulacionSkillTest extends TestCase
             ->assertNotFound();
     }
 
+    // ── Visor PDF (?inline=1) ─────────────────────────────────────────
+
+    public function test_el_certificado_lo_pide_en_linea_el_dueno_y_sigue_descargandose_sin_inline(): void
+    {
+        [$aspirante, $postulacion] = $this->base();
+        $this->actingAs($aspirante)
+            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['nombre' => 'Excel'])
+            ->assertCreated();
+        $skill = PostulacionSkill::sole();
+
+        $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
+            ->post("/api/postulaciones/{$postulacion->id}/skills/{$skill->id}/certificado", [
+                'archivo' => $this->pdf('excel.pdf'),
+            ])->assertOk();
+
+        $enLinea = $this->actingAs($aspirante)
+            ->get("/api/postulaciones/{$postulacion->id}/skills/{$skill->id}/certificado/archivo?inline=1")
+            ->assertOk();
+        $this->assertStringStartsWith('inline;', (string) $enLinea->headers->get('content-disposition'));
+
+        $descarga = $this->actingAs($aspirante)
+            ->get("/api/postulaciones/{$postulacion->id}/skills/{$skill->id}/certificado/archivo")
+            ->assertOk();
+        $this->assertStringStartsWith('attachment;', (string) $descarga->headers->get('content-disposition'));
+    }
+
+    public function test_el_revisor_tambien_puede_abrir_el_certificado_en_linea(): void
+    {
+        [$aspirante, $postulacion] = $this->base();
+        $this->actingAs($aspirante)
+            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['nombre' => 'Excel'])
+            ->assertCreated();
+        $skill = PostulacionSkill::sole();
+
+        $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
+            ->post("/api/postulaciones/{$postulacion->id}/skills/{$skill->id}/certificado", [
+                'archivo' => $this->pdf('excel.pdf'),
+            ])->assertOk();
+
+        $instructor = $this->instructor($aspirante->ficha);
+
+        $enLinea = $this->actingAs($instructor)
+            ->get("/api/revision/postulaciones/{$postulacion->id}/skills/{$skill->id}/certificado/archivo?inline=1")
+            ->assertOk();
+
+        $this->assertStringStartsWith('inline;', (string) $enLinea->headers->get('content-disposition'));
+    }
+
     public function test_descargar_un_certificado_ausente_devuelve_404(): void
     {
         [$aspirante, $postulacion] = $this->base();

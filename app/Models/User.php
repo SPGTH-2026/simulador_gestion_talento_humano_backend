@@ -51,12 +51,29 @@ class User extends Authenticatable implements MustVerifyEmail
     }
 
     /**
+     * Fichas que registró este usuario. El creador es el DUEÑO de la ficha
+     * (auto-ownership): aunque nadie se la asigne por el pivot, la administra.
+     */
+    public function fichasCreadas(): HasMany
+    {
+        return $this->hasMany(Ficha::class, 'creado_por');
+    }
+
+    /** Postulaciones del usuario (aspirante). Para contarlas en el portafolio. */
+    public function postulaciones(): HasMany
+    {
+        return $this->hasMany(Postulacion::class);
+    }
+
+    /**
      * Ids de las fichas sobre las que este usuario tiene alcance: salvo el super
      * admin (todas) el resto ve únicamente lo suyo. Todo endpoint de negocio
      * debe filtrar por esta lista: es la regla de aislamiento entre fichas.
      *
      * El instructor se liga por el pivot ficha_instructor; el aspirante y el
      * aprendiz llevan su ficha en users.ficha_id, así que esa también cuenta.
+     * La ficha que el propio usuario registró (fichas.creado_por) también
+     * cuenta: es suyas por creación, no por asignación.
      *
      * @return array<int>
      */
@@ -68,6 +85,7 @@ class User extends Authenticatable implements MustVerifyEmail
 
         return array_values(array_unique(array_merge(
             $this->fichas()->pluck('fichas.id')->all(),
+            $this->fichasCreadas()->pluck('fichas.id')->all(),
             $this->ficha_id ? [$this->ficha_id] : [],
         )));
     }

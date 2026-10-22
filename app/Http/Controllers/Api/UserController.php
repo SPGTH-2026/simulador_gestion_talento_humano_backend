@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Enums\Role;
 use App\Http\Controllers\Controller;
-use App\Models\Ficha;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -26,10 +25,12 @@ class UserController extends Controller
             'ficha_id' => ['nullable', 'integer', 'exists:fichas,id'],
             'role' => ['nullable', Rule::enum(Role::class)],
             'search' => ['nullable', 'string', 'max:120'],
+            // El portafolio documental pide solo gente que ya se haya postulado.
+            'con_postulaciones' => ['nullable', 'boolean'],
         ]);
 
         $actor = $request->user();
-        $query = User::query()->with('ficha');
+        $query = User::query()->with('ficha')->withCount('postulaciones');
 
         if ($datos['ficha_id'] ?? null) {
             $query->where('ficha_id', $datos['ficha_id']);
@@ -37,6 +38,10 @@ class UserController extends Controller
 
         if ($datos['role'] ?? null) {
             $query->where('role', $datos['role']);
+        }
+
+        if ($request->boolean('con_postulaciones')) {
+            $query->whereHas('postulaciones');
         }
 
         if ($datos['search'] ?? null) {
@@ -75,17 +80,6 @@ class UserController extends Controller
                 'total' => $usuarios->total(),
             ],
         ]);
-    }
-
-    /** Fichas sobre las que este usuario tiene alcance (para selects y filtros). */
-    public function fichas(Request $request): JsonResponse
-    {
-        $fichas = Ficha::query()
-            ->whereIn('id', $request->user()->fichaIds())
-            ->orderBy('codigo')
-            ->get(['id', 'codigo', 'nombre_programa', 'estado']);
-
-        return response()->json(['data' => $fichas]);
     }
 
     /**
@@ -172,6 +166,11 @@ class UserController extends Controller
             'subrole' => $u->subrole,
             'active' => (bool) $u->active,
             'email_verified' => (bool) $u->email_verified_at,
+            // Solo el listado lo trae conCount('postulaciones'); en el resto de
+            // respuestas (p. ej. update) no se ha cargado y queda 0.
+            'postulaciones_count' => (int) ($u->postulaciones_count ?? 0),
+            // Última actividad del registro, para la tabla del portafolio.
+            'updated_at' => $u->updated_at?->toIso8601String(),
             'ficha' => $u->ficha_id
                 ? [
                     'id' => $u->ficha_id,

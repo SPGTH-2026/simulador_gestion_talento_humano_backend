@@ -163,20 +163,20 @@ class PostulacionDocumentoController extends Controller
         return response()->json(null, 204);
     }
 
-    /** Descarga autorizada del archivo (dueño). */
+    /** Entrega el archivo (dueño). Por defecto attachment; ?inline=1 lo deja en la pestaña. */
     public function archivo(Request $request, Postulacion $postulacion, PostulacionDocumento $documento): Response
     {
         $this->exigirPropia($request, $postulacion);
 
-        return $this->descargar($postulacion, $documento);
+        return $this->descargar($postulacion, $documento, $request->boolean('inline'));
     }
 
-    /** Descarga autorizada del archivo (revisor con 'documentos:ver'). */
+    /** Entrega el archivo (revisor con 'documentos:ver'). Igual que archivo(): ?inline=1. */
     public function archivoRevision(Request $request, Postulacion $postulacion, PostulacionDocumento $documento): Response
     {
         $this->exigirRevision($request, $postulacion);
 
-        return $this->descargar($postulacion, $documento);
+        return $this->descargar($postulacion, $documento, $request->boolean('inline'));
     }
 
     // ── Reglas de acceso ───────────────────────────────────────────────
@@ -223,7 +223,7 @@ class PostulacionDocumentoController extends Controller
 
     // ── Archivos ───────────────────────────────────────────────────────
 
-    private function descargar(Postulacion $postulacion, PostulacionDocumento $documento): Response
+    private function descargar(Postulacion $postulacion, PostulacionDocumento $documento, bool $inline = false): Response
     {
         $this->exigirDocumentoDeLaPostulacion($postulacion, $documento);
 
@@ -231,6 +231,12 @@ class PostulacionDocumentoController extends Controller
 
         if (! $disco->exists($documento->ruta)) {
             abort(404, 'Documento no encontrado.');
+        }
+
+        // inline: el navegador lo muestra en la pestaña (Visor PDF del front).
+        // attachment: descarga clásica, el comportamiento histórico.
+        if ($inline) {
+            return $disco->response($documento->ruta, $documento->nombre_original);
         }
 
         return $disco->download($documento->ruta, $documento->nombre_original);
