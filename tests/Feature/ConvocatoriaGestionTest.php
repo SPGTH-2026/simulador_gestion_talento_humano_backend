@@ -113,7 +113,7 @@ class ConvocatoriaGestionTest extends TestCase
             ->assertJsonStructure(['errors' => ['ficha']]);
     }
 
-    public function test_instructor_con_dos_fichas_no_puede_crear(): void
+    public function test_instructor_con_dos_fichas_y_sin_elegir_no_puede_crear(): void
     {
         $instructor = $this->instructor($this->ficha('3173334'), $this->ficha('2631620'));
 
@@ -121,6 +121,46 @@ class ConvocatoriaGestionTest extends TestCase
             ->postJson('/api/convocatorias', ['nombre' => 'Dos fichas'])
             ->assertStatus(422)
             ->assertJsonStructure(['errors' => ['ficha']]);
+    }
+
+    public function test_instructor_con_dos_fichas_elige_en_cual_crea(): void
+    {
+        $primera = $this->ficha('3173334');
+        $segunda = $this->ficha('2631620');
+        $instructor = $this->instructor($primera, $segunda);
+
+        $respuesta = $this->actingAs($instructor)
+            ->postJson('/api/convocatorias', ['nombre' => 'Elegida', 'ficha_id' => $segunda->id])
+            ->assertCreated();
+
+        $this->assertSame($segunda->id, $respuesta->json('data.ficha.id'));
+    }
+
+    public function test_no_se_puede_crear_en_una_ficha_ajena(): void
+    {
+        $ajena = $this->ficha('2631620');
+        $instructor = $this->instructor($this->ficha('3173334'));
+
+        $this->actingAs($instructor)
+            ->postJson('/api/convocatorias', ['nombre' => 'Ajena', 'ficha_id' => $ajena->id])
+            ->assertStatus(422)
+            ->assertJsonStructure(['errors' => ['ficha_id']]);
+    }
+
+    public function test_no_se_puede_mover_la_ficha_de_una_convocatoria_al_editar(): void
+    {
+        $ficha = $this->ficha('3173334');
+        $otra = $this->ficha('2631620');
+        $instructor = $this->instructor($ficha, $otra);
+        $convocatoria = $this->crearConvocatoria($ficha, $instructor);
+
+        $this->actingAs($instructor)
+            ->patchJson("/api/convocatorias/{$convocatoria->id}", [
+                'nombre' => 'Con ficha cambiada',
+                'ficha_id' => $otra->id,
+            ])
+            ->assertStatus(422)
+            ->assertJsonStructure(['errors' => ['campos']]);
     }
 
     // ── Crear: caso mínimo y defaults ──────────────────────────────────

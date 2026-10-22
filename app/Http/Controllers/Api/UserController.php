@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Enums\Role;
 use App\Http\Controllers\Controller;
-use App\Models\Ficha;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -81,17 +80,6 @@ class UserController extends Controller
                 'total' => $usuarios->total(),
             ],
         ]);
-    }
-
-    /** Fichas sobre las que este usuario tiene alcance (para selects y filtros). */
-    public function fichas(Request $request): JsonResponse
-    {
-        $fichas = Ficha::query()
-            ->whereIn('id', $request->user()->fichaIds())
-            ->orderBy('codigo')
-            ->get(['id', 'codigo', 'nombre_programa', 'estado']);
-
-        return response()->json(['data' => $fichas]);
     }
 
     /**

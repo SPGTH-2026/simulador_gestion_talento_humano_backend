@@ -20,8 +20,11 @@ use Illuminate\Validation\ValidationException;
  * API del módulo de convocatorias (Paso 2b: crear, listar, ver y editar).
  *
  * Reglas de negocio:
- *  - La ficha NO viene del formulario: se toma del usuario autenticado, que debe
- *    tener exactamente una ficha en su alcance (0 o >1 -> 422).
+ *  - La ficha se toma del usuario autenticado. Si el usuario tiene una sola
+ *    ficha en su alcance, esa es; si tiene varias, el gestor elige una de
+ *    ellas al crear (ficha_id) y el backend comprueba que está en su alcance.
+ *    En la EDICIÓN la ficha no se puede cambiar: la convocatoria ya tiene
+ *    dueño (grupo) y moverla dejaría sus postulaciones en otro grupo.
  *  - El codigo (CONV-AAAA-NNN) y el estado inicial (borrador) los pone el sistema.
  *  - Los estados y los documentos de sistema se resuelven SIEMPRE por codigo.
  *  - La clasificación (tipo_convocatoria, tipo_empleo, tipo_contrato, modalidad)
@@ -31,7 +34,7 @@ use Illuminate\Validation\ValidationException;
 class ConvocatoriaController extends Controller
 {
     /** Campos que asigna el sistema y que nunca se aceptan en el cuerpo. */
-    private const RESERVADOS = ['id', 'ficha_id', 'codigo', 'estado', 'estado_id', 'creado_por'];
+    private const RESERVADOS = ['id', 'codigo', 'estado', 'estado_id', 'creado_por'];
 
     /** Clasificaciones: campo en el body => tema del catálogo. */
     private const CLASIFICACIONES = [
@@ -138,9 +141,12 @@ class ConvocatoriaController extends Controller
 
     /**
      * Crea una convocatoria en estado borrador. La ficha, el codigo, el estado y
-     * el creador los pone el sistema. A los documentos que envie el gestor se le
-     * SUMAN los obligatorios (config/convocatorias.php): los obligatorios quedan
-     * con obligatorio = true y los opcionales elegidos segun la regla.
+     * el creador los pone el sistema. La ficha es la del usuario autenticado:
+     * si tiene una sola en su alcance, esa es; si tiene varias, se elige una
+     * (ficha_id) y se comprueba que está en su alcance.
+     * A los documentos que envie el gestor se le SUMAN los obligatorios
+     * (config/convocatorias.php): los obligatorios quedan con obligatorio =
+     * true y los opcionales elegidos segun la regla.
      */
     public function store(Request $request): JsonResponse
     {
@@ -148,7 +154,7 @@ class ConvocatoriaController extends Controller
 
         $this->rechazarReservados($request);
         $datos = $this->validar($request, null);
-        $fichaId = $this->resolverFicha($user);
+        $fichaId = $this->resolverFicha($user, $request->input('ficha_id'));
 
         $convocatoria = new Convocatoria();
         $convocatoria->forceFill($datos['campos'] + [
@@ -195,7 +201,9 @@ class ConvocatoriaController extends Controller
     public function update(Request $request, Convocatoria $convocatoria): JsonResponse
     {
         $this->autorizar($convocatoria, $request);
-        $this->rechazarReservados($request);
+        // La ficha no se puede cambiar en la edición: mover la convocatoria
+        // dejaría sus postulaciones en otro grupo.
+        $this->rechazarReservados($request, ['ficha_id']);
 
         $estado = $convocatoria->estado?->codigo;
 
@@ -635,10 +643,14 @@ class ConvocatoriaController extends Controller
         return $limpias;
     }
 
-    private function rechazarReservados(Request $request): void
+    /**
+     * Rechaza los campos que asigna el sistema. `$extra` son los que además
+     * están reservados en este contexto concreto (ficha_id al editar).
+     */
+    private function rechazarReservados(Request $request, array $extra = []): void
     {
         $presentes = array_values(array_filter(
-            self::RESERVADOS,
+            array_merge(self::RESERVADOS, $extra),
             fn (string $campo) => $request->has($campo),
         ));
 
@@ -651,18 +663,34 @@ class ConvocatoriaController extends Controller
 
     // ── Persistencia ───────────────────────────────────────────────────
 
-    /** Ficha del usuario: debe tener exactamente una (0 o >1 -> 422). */
-    private function resolverFicha(User $user): int
+    /**
+     * Ficha de la convocatoria. Si el gestor elige una (ficha_id), tiene que
+     * estar en su alcance; si no elige ninguna y solo tiene una ficha en su
+     * alcance, esa es; si tiene varias y no elige, se le pide que elija (422).
+     */
+    private function resolverFicha(User $user, mixed $elegida = null): int
     {
-        $fichaIds = $user->fichaIds();
+        $alcance = array_map('intval', $user->fichaIds());
 
-        if (count($fichaIds) !== 1) {
+        if ($elegida !== null && $elegida !== '') {
+            $fichaId = (int) $elegida;
+
+            if (! in_array($fichaId, $alcance, true)) {
+                throw ValidationException::withMessages([
+                    'ficha_id' => 'La ficha debe ser una de las tuyas.',
+                ]);
+            }
+
+            return $fichaId;
+        }
+
+        if (count($alcance) !== 1) {
             throw ValidationException::withMessages([
-                'ficha' => 'No se pudo determinar la ficha de la convocatoria: tu usuario debe tener exactamente una ficha asociada.',
+                'ficha' => 'Elige la ficha de la convocatoria: tu usuario tiene '.count($alcance).' fichas en su alcance.',
             ]);
         }
 
-        return (int) $fichaIds[0];
+        return $alcance[0];
     }
 
     /** Código CONV-AAAA-NNN, secuencial por ficha y año. */
