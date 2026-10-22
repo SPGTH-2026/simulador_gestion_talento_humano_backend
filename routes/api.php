@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ConvocatoriaController;
 use App\Http\Controllers\Api\ParametroController;
 use App\Http\Controllers\Api\PerfilAspiranteController;
+use App\Http\Controllers\Api\PortafolioController;
 use App\Http\Controllers\Api\PostulacionController;
 use App\Http\Controllers\Api\PostulacionDocumentoController;
 use App\Http\Controllers\Api\PostulacionSkillController;
@@ -45,13 +46,14 @@ Route::prefix('auth')->group(function () {
 Route::middleware(['auth:sanctum', 'verified', 'can:usuarios:gestionar'])->group(function () {
     Route::get('usuarios', [UserController::class, 'index']);
     Route::patch('usuarios/{user}', [UserController::class, 'update']);
+
     Route::get('fichas', [UserController::class, 'fichas']);
 });
 
 // ── Convocatorias y parámetros ─────────────────────────────────────────
 // 'ver' para aspirante/gestores visualizar; 'gestionar' para crear, editar y
 // cambiar estado. El selector de fichas del formulario es GET /api/fichas
-// (UserController@fichas): GET /api/convocatorias/fichas se retiró en el Paso 2b.
+// (UserController:fichas): GET /api/convocatorias/fichas se retiró en el Paso 2b.
 Route::middleware(['auth:sanctum', 'verified'])->group(function () {
     Route::get('parametros', [ParametroController::class, 'index'])->middleware('can:convocatorias:ver');
 
@@ -149,6 +151,14 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
             ->whereNumber('postulacion')->whereNumber('skill')
             ->missing(fn () => abort(404, 'Postulación no encontrada.'));
     });
+
+    // Portafolio documental de un usuario (permiso 'documentos:ver'): sus
+    // postulaciones y el estado de sus documentos. Alcance por ficha dentro del
+    // controlador (fuera de su ficha -> 404, sin revelar existencia).
+    Route::get('portafolios/{user}', [PortafolioController::class, 'show'])
+        ->middleware('can:documentos:ver')
+        ->whereNumber('user')
+        ->missing(fn () => abort(404, 'Portafolio no encontrado.'));
 });
 
 // ── Ejemplo: cada ruta de negocio declara el permiso que exige (403 si el rol no lo tiene) ──
