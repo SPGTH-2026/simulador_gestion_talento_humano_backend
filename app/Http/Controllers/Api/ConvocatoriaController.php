@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api;
 use App\Enums\ConvocatoriaEstado;
 use App\Enums\PostulacionEstado;
 use App\Enums\Role;
+use App\Http\Controllers\Api\Concerns\IdentificadorConvocatoria;
 use App\Http\Controllers\Controller;
 use App\Models\Convocatoria;
+use App\Models\ConvocatoriaSkill;
 use App\Models\Parametro;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
@@ -33,6 +35,8 @@ use Illuminate\Validation\ValidationException;
  */
 class ConvocatoriaController extends Controller
 {
+    use IdentificadorConvocatoria;
+
     /** Campos que asigna el sistema y que nunca se aceptan en el cuerpo. */
     private const RESERVADOS = ['id', 'codigo', 'estado', 'estado_id', 'creado_por'];
 
@@ -89,9 +93,9 @@ class ConvocatoriaController extends Controller
             $query->where('ficha_id', $datos['ficha_id']);
         }
 
-        // El buscador se aplica SOBRE la consulta ya acotada por ficha/estado:
-        // nunca amplía el alcance.
-        $this->aplicarBuscador($query, $datos['q'] ?? null);
+        // El buscador aplica los mismos filtros a todos; el código (dato de
+        // gestión) solo se busca para quien está en la lista blanca.
+        $this->aplicarBuscador($query, $datos['q'] ?? null, $this->veIdentificadorConvocatoria($user));
 
         // Campos de postulación que le corresponden al usuario (sin N+1).
         $this->aplicarCamposDePostulacion($query, $user);
@@ -118,8 +122,12 @@ class ConvocatoriaController extends Controller
      * Buscador del listado: coincidencia parcial (LIKE) en nombre, codigo y cargo.
      * Recorta espacios, escapa los comodines % y _ (para tratarlos como texto
      * literal) y se combina con el resto de filtros. Un q vacío se ignora.
+     *
+     * El CÓDIGO (CONV-AAAA-NNN) solo se busca para quien tiene
+     * 'convocatorias:gestionar': es un dato de gestión y el aspirante no lo
+     * ve (tampoco lo recibe en la respuesta).
      */
-    private function aplicarBuscador(Builder $query, ?string $q): void
+    private function aplicarBuscador(Builder $query, ?string $q, bool $buscaPorCodigo = true): void
     {
         $termino = trim((string) $q);
 
@@ -132,10 +140,14 @@ class ConvocatoriaController extends Controller
         $escapado = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $termino);
         $patron = '%'.$escapado.'%';
 
-        $query->where(function (Builder $sub) use ($patron) {
-            $sub->whereRaw("nombre LIKE ? ESCAPE '!'", [$patron])
-                ->orWhereRaw("codigo LIKE ? ESCAPE '!'", [$patron])
-                ->orWhereRaw("cargo LIKE ? ESCAPE '!'", [$patron]);
+        $query->where(function (Builder $sub) use ($patron, $buscaPorCodigo) {
+            $sub->whereRaw("nombre LIKE ? ESCAPE '!'", [$patron]);
+
+            if ($buscaPorCodigo) {
+                $sub->orWhereRaw("codigo LIKE ? ESCAPE '!'", [$patron]);
+            }
+
+            $sub->orWhereRaw("cargo LIKE ? ESCAPE '!'", [$patron]);
         });
     }
 
@@ -405,7 +417,6 @@ class ConvocatoriaController extends Controller
         $esAlta = $actual === null;
 
         $maxSkills = (int) config('convocatorias.skills_max');
-        $maxSkill = (int) config('convocatorias.skill_max_longitud');
 
         $reglas = [
             'nombre' => [$esAlta ? 'required' : 'sometimes', 'filled', 'string', 'max:150'],
@@ -425,8 +436,11 @@ class ConvocatoriaController extends Controller
             'fecha_apertura' => ['nullable', 'date'],
             'fecha_cierre' => ['nullable', 'date'],
             'fecha_evaluacion' => ['nullable', 'date'],
+            // Las skills se validan una por una en normalizarSkills: cada ítem
+            // puede ser texto libre o un objeto {nombre, parametro_id}, así que
+            // aquí solo se acota la cantidad (el mensaje del tope vive en
+            // mensajes(), clave 'skills.max').
             'skills' => ['nullable', 'array', 'max:'.$maxSkills],
-            'skills.*' => ['nullable', 'string', 'max:'.$maxSkill],
             'documentos' => ['nullable', 'array'],
             'tipo_convocatoria' => ['nullable', 'string'],
             'tipo_convocatoria_id' => ['nullable', 'integer'],
@@ -479,6 +493,17 @@ class ConvocatoriaController extends Controller
                 : null;
         }
 
+        // Skills: se normalizan ANTES de lanzar los errores, para que un
+        // nombre repetido, demasiado largo o un parametro_id inválido
+        // devuelvan su 422 y no se guarden de más.
+        if ($esAlta) {
+            $skills = $this->normalizarSkills($datos['skills'] ?? [], $errores);
+        } else {
+            $skills = array_key_exists('skills', $datos)
+                ? $this->normalizarSkills($datos['skills'] ?? [], $errores)
+                : null;
+        }
+
         if ($errores !== []) {
             throw ValidationException::withMessages($errores);
         }
@@ -495,14 +520,6 @@ class ConvocatoriaController extends Controller
         }
 
         $campos += $clasificacion;
-
-        if ($esAlta) {
-            $skills = $this->normalizarSkills($datos['skills'] ?? []);
-        } else {
-            $skills = array_key_exists('skills', $datos)
-                ? $this->normalizarSkills($datos['skills'] ?? [])
-                : null;
-        }
 
         return [
             'campos' => $campos,
@@ -619,28 +636,127 @@ class ConvocatoriaController extends Controller
         return array_values($normalizados);
     }
 
-    /** Recorta, descarta vacías y deduplica sin distinguir mayúsculas. */
-    private function normalizarSkills(array $skills): array
+    /**
+     * Normaliza las skills de la convocatoria y deja los errores en $errores.
+     *
+     * Acepta DOS formatos por ítem (compatibilidad con lo que ya enviaba el
+     * frontend y con las skills guardadas):
+     *  - texto libre: 'Excel'
+     *  - del catálogo: ['nombre' => 'Excel', 'parametro_id' => 44]
+     *
+     * Reglas (todas con 422 y mensaje en español):
+     *  - el tope de cantidad lo aplica la regla 'skills' => max (ver validar()).
+     *  - cada nombre, como máximo config('convocatorias.skill_max_longitud').
+     *  - sin duplicados, ignorando mayúsculas y espacios sobrantes.
+     *  - si viene parametro_id, debe existir y ser del tema skill_catalogo; el
+     *    nombre se toma SIEMPRE del catálogo (el cliente no decide cómo se
+     *    llama). Sin parametro_id, la skill es texto libre.
+     *
+     * Los errores de conjunto van bajo la clave 'skills' y los de un ítem
+     * bajo 'skills.{indice}', que es la forma que el frontend ya sabe leer.
+     *
+     * @return array<int, array{nombre: string, parametro_id: int|null}>
+     */
+    private function normalizarSkills(mixed $skills, array &$errores): array
     {
-        $limpias = [];
+        if (! is_array($skills)) {
+            return [];
+        }
+
+        $maxSkill = (int) config('convocatorias.skill_max_longitud');
+
+        $normalizadas = [];
         $vistas = [];
 
-        foreach ($skills as $skill) {
-            $texto = trim((string) $skill);
-            if ($texto === '') {
+        foreach (array_values($skills) as $indice => $item) {
+            $parametroId = null;
+            $nombre = null;
+
+            if ($item === null) {
+                // Cadena vacía (Laravel la convierte a null): se descarta.
                 continue;
             }
 
-            $clave = mb_strtolower($texto);
+            if (is_array($item)) {
+                $parametroId = $item['parametro_id'] ?? null;
+                $nombre = $item['nombre'] ?? null;
+            } elseif (is_string($item)) {
+                $nombre = $item;
+            } else {
+                $errores["skills.{$indice}"][] = 'Cada skill debe ser texto.';
+                continue;
+            }
+
+            if ($parametroId !== null && $parametroId !== '') {
+                if (! is_numeric($parametroId)) {
+                    $errores["skills.{$indice}"][] = 'La skill seleccionada no es válida.';
+                    continue;
+                }
+
+                $parametro = $this->parametroSkillCatalogo((int) $parametroId);
+
+                if ($parametro === null) {
+                    $errores["skills.{$indice}"][] = 'La skill seleccionada no es válida.';
+                    continue;
+                }
+
+                // El nombre lo pone el catálogo, no el cliente.
+                $nombre = $parametro->nombre;
+                $parametroId = (int) $parametro->id;
+            } else {
+                $parametroId = null;
+                $nombre = is_string($nombre) ? $nombre : '';
+            }
+
+            $nombre = $this->recortarTexto($nombre);
+
+            if ($nombre === '') {
+                // Vacía: se descarta (no ocupa lugar ni es un error).
+                continue;
+            }
+
+            if (mb_strlen($nombre) > $maxSkill) {
+                $errores["skills.{$indice}"][] = "Cada skill no debe superar los {$maxSkill} caracteres.";
+                continue;
+            }
+
+            $clave = mb_strtolower($nombre);
+
             if (isset($vistas[$clave])) {
+                $errores['skills'][] = 'No puedes repetir la misma skill.';
                 continue;
             }
 
             $vistas[$clave] = true;
-            $limpias[] = $texto;
+            $normalizadas[] = ['nombre' => $nombre, 'parametro_id' => $parametroId];
         }
 
-        return $limpias;
+        return $normalizadas;
+    }
+
+    /**
+     * Parámetro del catálogo de skills (tema skill_catalogo) y activo. El tema
+     * se resuelve por CODIGO, nunca por id ni por nombre.
+     */
+    private function parametroSkillCatalogo(int $id): ?Parametro
+    {
+        return Parametro::query()
+            ->whereKey($id)
+            ->whereHas('tema', fn ($q) => $q->where('codigo', 'skill_catalogo'))
+            ->where('activo', true)
+            ->first();
+    }
+
+    /**
+     * Recorta el texto y deja UN solo espacio entre palabras: así '  Excel  ' y
+     * 'Excel avanzado' se comparan siempre igual (sin distinguir mayúsculas ni
+     * espacios sobrantes).
+     */
+    private function recortarTexto(string $texto): string
+    {
+        $recortado = preg_replace('/\s+/u', ' ', trim($texto));
+
+        return is_string($recortado) ? $recortado : trim($texto);
     }
 
     /**
@@ -713,12 +829,20 @@ class ConvocatoriaController extends Controller
         return sprintf('CONV-%d-%03d', $anio, $secuencia);
     }
 
+    /**
+     * Reemplaza el conjunto de skills de la convocatoria. Cada skill guarda su
+     * nombre (siempre) y, si vino del catálogo, el parametro_id (FK SET NULL:
+     * si la skill se retira del catálogo, la fila sobrevive con su nombre).
+     */
     private function reemplazarSkills(Convocatoria $convocatoria, array $skills): void
     {
         $convocatoria->skills()->delete();
 
-        foreach ($skills as $nombre) {
-            $convocatoria->skills()->create(['nombre' => $nombre]);
+        foreach ($skills as $skill) {
+            $convocatoria->skills()->create([
+                'nombre' => $skill['nombre'],
+                'parametro_id' => $skill['parametro_id'] ?? null,
+            ]);
         }
     }
 
@@ -939,7 +1063,9 @@ class ConvocatoriaController extends Controller
 
     /**
      * Conjunto de skills recortadas, en minúscula y ordenado: igualdad sin
-     * distinguir orden ni mayúsculas.
+     * distinguir orden ni mayúsculas. Acepta las dos formas que llegan aquí:
+     * los nombres guardados (strings) y las ya normalizadas
+     * (['nombre' => ..., 'parametro_id' => ...]).
      *
      * @return string[]
      */
@@ -947,9 +1073,14 @@ class ConvocatoriaController extends Controller
     {
         $conjunto = [];
         foreach ($skills as $skill) {
-            $texto = mb_strtolower(trim((string) $skill));
+            $texto = is_array($skill)
+                ? (string) ($skill['nombre'] ?? '')
+                : (string) $skill;
+
+            $texto = $this->recortarTexto($texto);
+
             if ($texto !== '') {
-                $conjunto[$texto] = true;
+                $conjunto[mb_strtolower($texto)] = true;
             }
         }
 
@@ -1096,19 +1227,24 @@ class ConvocatoriaController extends Controller
     {
         return [
             'id' => $c->id,
-            'codigo' => $c->codigo,
+            'codigo' => $this->codigoDe($c, $user),
             'nombre' => $c->nombre,
             'cargo' => $c->cargo,
             'area' => $c->area,
             'estado' => $this->parametro($c->estado),
-            'ficha' => $this->ficha($c),
+            'ficha' => $this->fichaVisible($c, $user),
             'tipo_convocatoria' => $this->parametro($c->tipoConvocatoria),
             'tipo_empleo' => $this->parametro($c->tipoEmpleo),
+            'modalidad' => $this->parametro($c->modalidad),
+            'tipo_contrato' => $this->parametro($c->tipoContrato),
             'vacantes' => (int) $c->vacantes,
             'salario_min' => $this->numero($c->salario_min),
             'salario_max' => $this->numero($c->salario_max),
             'fecha_apertura' => $c->fecha_apertura?->toDateString(),
             'fecha_cierre' => $c->fecha_cierre?->toDateString(),
+            'documentos' => $this->presentarDocumentos($c),
+            'skills' => $c->skills->pluck('nombre')->values(),
+            'skills_detalle' => $this->presentarSkills($c),
         ] + $this->camposDePostulacion($c, $user);
     }
 
@@ -1116,8 +1252,8 @@ class ConvocatoriaController extends Controller
     {
         return [
             'id' => $c->id,
-            'codigo' => $c->codigo,
-            'ficha' => $this->ficha($c),
+            'codigo' => $this->codigoDe($c, $user),
+            'ficha' => $this->fichaVisible($c, $user),
             'nombre' => $c->nombre,
             'cargo' => $c->cargo,
             'area' => $c->area,
@@ -1141,16 +1277,62 @@ class ConvocatoriaController extends Controller
             'fecha_cierre' => $c->fecha_cierre?->toDateString(),
             'fecha_evaluacion' => $c->fecha_evaluacion?->toDateString(),
             'skills' => $c->skills->pluck('nombre')->values(),
-            'documentos' => $c->documentos->map(fn (Parametro $d) => [
-                'id' => $d->id,
-                'codigo' => $d->codigo,
-                'nombre' => $d->nombre,
-                // Obligatoriedad real guardada: true para los siempre obligatorios
-                // (config/convocatorias.php) y para los opcionales que el gestor
-                // incluyó como obligatorios.
-                'obligatorio' => (bool) $d->pivot->obligatorio,
-            ])->values(),
+            'skills_detalle' => $this->presentarSkills($c),
+            'documentos' => $this->presentarDocumentos($c),
         ] + $this->camposDePostulacion($c, $user);
+    }
+
+    /**
+     * Skills de la convocatoria con su origen: 'parametro_id' apunta al
+     * parámetro del catálogo (tema skill_catalogo) y es NULL cuando la skill
+     * es texto libre. La lista 'skills' (solo nombres) se mantiene por
+     * compatibilidad con lo que ya consume el frontend.
+     */
+    private function presentarSkills(Convocatoria $c): array
+    {
+        return $c->skills
+            ->map(fn (ConvocatoriaSkill $s) => [
+                'id' => (int) $s->id,
+                'nombre' => $s->nombre,
+                'parametro_id' => $s->parametro_id === null ? null : (int) $s->parametro_id,
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function presentarDocumentos(Convocatoria $c): array
+    {
+        $documentos = $c->documentos;
+
+        if ($documentos->isEmpty()) {
+            return [];
+        }
+
+        // Asegurar orden estable e igual al criterio de negocio: obligatorios primero
+        $ordenados = $documentos->sortByDesc(function ($d) {
+            return (bool) ($d->pivot->obligatorio ?? false);
+        })->values();
+
+        return $ordenados->map(fn (Parametro $d) => [
+            'id' => $d->id,
+            'codigo' => $d->codigo,
+            'nombre' => $d->nombre,
+            // Obligatoriedad real guardada: true para los siempre obligatorios
+            // (config/convocatorias.php) y para los opcionales que el gestor
+            // incluyó como obligatorios.
+            'obligatorio' => (bool) $d->pivot->obligatorio,
+        ])->values()->all();
+    }
+
+    /**
+     * Código de la convocatoria (CONV-AAAA-NNN): es un dato de GESTIÓN, así
+     * que solo lo recibe quien está en la lista blanca (instructor, super
+     * admin y el subrol gestor_convocatorias). Para el resto llega en null:
+     * la clave sigue existiendo para no romper el contrato del JSON.
+     */
+    private function codigoDe(Convocatoria $c, User $user): ?string
+    {
+        return $this->veIdentificadorConvocatoria($user) ? $c->codigo : null;
     }
 
     private function ficha(Convocatoria $c): ?array
@@ -1162,6 +1344,20 @@ class ConvocatoriaController extends Controller
                 'nombre_programa' => $c->ficha->nombre_programa,
             ]
             : null;
+    }
+
+    /**
+     * Ficha de la convocatoria: SOLO la ven el instructor y el super admin.
+     * El aspirante y el subrol gestor_convocatorias reciben null (la clave
+     * sigue en la respuesta, para no romper el contrato del JSON).
+     */
+    private function fichaVisible(Convocatoria $c, User $user): ?array
+    {
+        if (! in_array($user->role, [Role::Instructor, Role::SuperAdmin], true)) {
+            return null;
+        }
+
+        return $this->ficha($c);
     }
 
     private function parametro(?Parametro $parametro): ?array

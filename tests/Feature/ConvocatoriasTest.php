@@ -97,7 +97,7 @@ class ConvocatoriasTest extends TestCase
         $this->assertCount(10, $grupos);
 
         $total = array_sum(array_map(fn (array $g) => count($g['parametros']), $grupos));
-        $this->assertSame(52, $total);
+        $this->assertSame(43, $total);
 
         foreach ($grupos as $grupo) {
             $this->assertSame(['tema', 'nombre', 'parametros'], array_keys($grupo));

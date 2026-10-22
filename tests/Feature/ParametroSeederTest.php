@@ -55,7 +55,7 @@ class ParametroSeederTest extends TestCase
             'modalidad' => 3,
             'sexo' => 2,
             'skill_tecnica' => 6,
-            'skill_catalogo' => 19,
+            'skill_catalogo' => 10,
         ];
 
         foreach ($esperados as $tema => $cantidad) {
@@ -66,7 +66,7 @@ class ParametroSeederTest extends TestCase
             );
         }
 
-        $this->assertSame(52, Parametro::count());
+        $this->assertSame(43, Parametro::count());
     }
 
     public function test_valores_de_sistema_quedan_con_codigo_activos_y_es_sistema(): void
@@ -100,7 +100,7 @@ class ParametroSeederTest extends TestCase
         $this->ejecutarSeeder();
 
         $this->assertSame(10, ParametroTema::count());
-        $this->assertSame(52, Parametro::count());
+        $this->assertSame(43, Parametro::count());
     }
 
     /**
@@ -195,7 +195,7 @@ class ParametroSeederTest extends TestCase
             'Entrevistas por competencias',
         ], $nombres);
 
-        // skill_catalogo: 19 skills con código estable (para declararlas por id).
+        // skill_catalogo: 10 skills con código estable (para declararlas por id).
         $catalogo = Parametro::whereHas('tema', fn ($q) => $q->where('codigo', 'skill_catalogo'))
             ->orderBy('orden')
             ->get();
@@ -210,6 +210,41 @@ class ParametroSeederTest extends TestCase
             'adaptabilidad',
             'excel',
             'word',
+            'redaccion_informes',
+        ], $catalogo->pluck('codigo')->all());
+
+        $this->assertSame('Comunicación asertiva', Parametro::porTemaYCodigo('skill_catalogo', 'comunicacion_asertiva')->nombre);
+        $this->assertSame('Atención al cliente', Parametro::porTemaYCodigo('skill_catalogo', 'atencion_al_cliente')->nombre);
+        $this->assertSame('Redacción de informes', Parametro::porTemaYCodigo('skill_catalogo', 'redaccion_informes')->nombre);
+    }
+
+    public function test_las_skills_retiradas_ya_no_se_siembran(): void
+    {
+        $this->ejecutarSeeder();
+
+        // Las 10 que quedan existen con su código.
+        $vigentes = [
+            'comunicacion_asertiva',
+            'trabajo_en_equipo',
+            'liderazgo',
+            'resolucion_problemas',
+            'gestion_del_tiempo',
+            'atencion_al_cliente',
+            'adaptabilidad',
+            'excel',
+            'word',
+            'redaccion_informes',
+        ];
+
+        foreach ($vigentes as $codigo) {
+            $this->assertNotNull(
+                Parametro::porTemaYCodigo('skill_catalogo', $codigo),
+                "La skill {$codigo} debe seguir en el catálogo."
+            );
+        }
+
+        // Las 9 retiradas ya no se siembran.
+        $retiradas = [
             'powerpoint',
             'ingles',
             'sql_bases_de_datos',
@@ -219,12 +254,19 @@ class ParametroSeederTest extends TestCase
             'seguridad_salud_trabajo',
             'manejo_inventarios',
             'gestion_documental',
-            'redaccion_informes',
-        ], $catalogo->pluck('codigo')->all());
+        ];
 
-        $this->assertSame('Comunicación asertiva', Parametro::porTemaYCodigo('skill_catalogo', 'comunicacion_asertiva')->nombre);
-        $this->assertSame('Seguridad y salud en el trabajo', Parametro::porTemaYCodigo('skill_catalogo', 'seguridad_salud_trabajo')->nombre);
-        $this->assertSame('Redacción de informes', Parametro::porTemaYCodigo('skill_catalogo', 'redaccion_informes')->nombre);
+        foreach ($retiradas as $codigo) {
+            $this->assertNull(
+                Parametro::porTemaYCodigo('skill_catalogo', $codigo),
+                "La skill {$codigo} ya no debe estar en el catálogo."
+            );
+        }
+
+        $this->assertSame(
+            10,
+            Parametro::whereHas('tema', fn ($q) => $q->where('codigo', 'skill_catalogo'))->count()
+        );
     }
 
     public function test_los_documentos_eliminados_ya_no_se_siembran(): void

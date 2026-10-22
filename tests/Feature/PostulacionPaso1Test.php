@@ -170,7 +170,7 @@ class PostulacionPaso1Test extends TestCase
         $this->seed(ParametroSeeder::class);
 
         $this->assertSame(10, ParametroTema::count());
-        $this->assertSame(52, Parametro::count());
+        $this->assertSame(43, Parametro::count());
         $this->assertNotNull($this->parametro('estado_postulacion', 'borrador'));
         $this->assertNotNull($this->parametro('estado_postulacion', 'postulada'));
         $this->assertNotNull($this->parametro('estado_postulacion', 'retirada'));

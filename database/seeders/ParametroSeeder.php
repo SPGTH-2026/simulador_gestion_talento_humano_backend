@@ -13,7 +13,7 @@ class ParametroSeeder extends Seeder
      * Render se ejecutará en cada arranque. NUNCA borra ni desactiva nada, y
      * los parámetros es_sistema conservan su codigo y quedan siempre activos.
      *
-     * 10 temas / 52 parámetros:
+     * 10 temas / 43 parámetros:
      *  - estado_convocatoria (4, es_sistema): borrador, publicada, en_proceso, cerrada
      *  - estado_postulacion (3, es_sistema): borrador, postulada, retirada
      *  - tipo_convocatoria (2): interno, externo (es_defecto)
@@ -22,9 +22,10 @@ class ParametroSeeder extends Seeder
      *  - modalidad (3): presencial (es_defecto), remoto, hibrido
      *  - sexo (2): hombre, mujer (para el perfil del aspirante)
      *  - skill_tecnica (6): sugerencias para el campo de skills de texto libre
-     *  - skill_catalogo (19): catálogo general de skills (blandas + técnicas) para
+     *  - skill_catalogo (10): catálogo general de skills (blandas + técnicas) para
      *    el paso de la postulación; se resuelven por código y traen el `codigo`
-     *    del parámetro para poder declararlas por `parametro_id`.
+     *    del parámetro para poder declararlas por `parametro_id`. Las 9 skills
+     *    retiradas del catálogo ya NO se siembran (ver comentario del tema).
      *  - tipo_documento (6): hoja_de_vida y certificados_laborales (es_sistema).
      *    Cuáles son obligatorios en toda convocatoria se define en
      *    config/convocatorias.php (no aquí). Los 3 documentos retirados del
@@ -79,6 +80,12 @@ class ParametroSeeder extends Seeder
             // Catálogo general de skills del aspirante (Paso 4). Cada una lleva
             // código estable para poder declararla por `parametro_id` y para que
             // el seeder sea idempotente sin tocar ids existentes.
+            //
+            // Solo 10 skills, válidas para cualquier convocatoria sin importar el
+            // cargo. Se retiraron del catálogo (ya no se siembran): powerpoint,
+            // ingles, sql_bases_de_datos, analisis_de_datos, contabilidad_basica,
+            // manejo_nomina, seguridad_salud_trabajo, manejo_inventarios y
+            // gestion_documental. Las 10 que quedan conservan su codigo y su id.
             'skill_catalogo' => ['nombre' => 'Catálogo de skills', 'parametros' => [
                 // Blandas.
                 ['codigo' => 'comunicacion_asertiva', 'nombre' => 'Comunicación asertiva', 'orden' => 1],
@@ -91,16 +98,7 @@ class ParametroSeeder extends Seeder
                 // Técnicas.
                 ['codigo' => 'excel', 'nombre' => 'Excel', 'orden' => 8],
                 ['codigo' => 'word', 'nombre' => 'Word', 'orden' => 9],
-                ['codigo' => 'powerpoint', 'nombre' => 'PowerPoint', 'orden' => 10],
-                ['codigo' => 'ingles', 'nombre' => 'Inglés', 'orden' => 11],
-                ['codigo' => 'sql_bases_de_datos', 'nombre' => 'SQL y bases de datos', 'orden' => 12],
-                ['codigo' => 'analisis_de_datos', 'nombre' => 'Análisis de datos', 'orden' => 13],
-                ['codigo' => 'contabilidad_basica', 'nombre' => 'Contabilidad básica', 'orden' => 14],
-                ['codigo' => 'manejo_nomina', 'nombre' => 'Manejo de nómina', 'orden' => 15],
-                ['codigo' => 'seguridad_salud_trabajo', 'nombre' => 'Seguridad y salud en el trabajo', 'orden' => 16],
-                ['codigo' => 'manejo_inventarios', 'nombre' => 'Manejo de inventarios', 'orden' => 17],
-                ['codigo' => 'gestion_documental', 'nombre' => 'Gestión documental', 'orden' => 18],
-                ['codigo' => 'redaccion_informes', 'nombre' => 'Redacción de informes', 'orden' => 19],
+                ['codigo' => 'redaccion_informes', 'nombre' => 'Redacción de informes', 'orden' => 10],
             ]],
             'sexo' => ['nombre' => 'Sexo', 'parametros' => [
                 ['codigo' => 'hombre', 'nombre' => 'Masculino', 'orden' => 1],
