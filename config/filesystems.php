@@ -80,8 +80,13 @@ return [
             // acceso siempre pasa por el proxy del backend (descarga/ver), que
             // es el único que conoce la clave del archivo.
             'visibility' => 'private',
-            'throw' => false,
-            'report' => false,
+            // 'throw' => true: los fallos del disco (credenciales, bucket, red)
+            // lanzan excepción y se convierten en un 503 con mensaje claro, en
+            // vez de disfrazarse de "archivo no encontrado" (404). Con
+            // 'throw' => false un error de R2 se tragaba y el usuario veía un
+            // 404 sin explicación, que fue justo lo que pasó en producción.
+            'throw' => true,
+            'report' => true,
         ],
 
     ],

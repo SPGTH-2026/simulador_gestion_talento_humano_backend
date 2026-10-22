@@ -27,7 +27,7 @@ class RolePermissionsTest extends TestCase
         $todos = config('permissions.all');
 
         $this->assertSame($todos, $u->permissions());
-        $this->assertCount(16, $todos);
+        $this->assertCount(17, $todos);
     }
 
     public function test_instructor_lo_tiene_todo_menos_los_exclusivos(): void
@@ -80,6 +80,6 @@ class RolePermissionsTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $this->assertGreaterThan(0, User::whereNotNull('email_verified_at')->count());
-        $this->assertSame(16, count(User::where('email', 'admin@test.com')->first()->permissions()));
+        $this->assertSame(17, count(User::where('email', 'admin@test.com')->first()->permissions()));
     }
 }

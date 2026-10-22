@@ -10,6 +10,7 @@ use App\Models\Postulacion;
 use App\Models\PostulacionSkill;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
@@ -166,22 +167,29 @@ class PostulacionSkillController extends Controller
         $this->exigirSkillDeLaPostulacion($postulacion, $skill);
         $this->exigirEditable($postulacion, 'skills');
 
-        $request->validate(['archivo' => $this->reglasArchivo()], $this->mensajes(), $this->atributos());
+        return $this->guardarCertificado($request, $skill);
+    }
 
-        $nuevo = $this->guardarArchivo($request->file('archivo'), "postulaciones/{$postulacion->id}/skills");
-        $anterior = [$skill->certificado_disco, $skill->certificado_ruta];
+    /**
+     * Gestión documental del admin: sube o reemplaza el certificado de una skill
+     * de un aspirante, sin exigir ventana ni estado editable.
+     */
+    public function certificadoGestion(Request $request, Postulacion $postulacion, PostulacionSkill $skill): JsonResponse
+    {
+        $this->exigirRevision($request, $postulacion, true);
+        $this->exigirSkillDeLaPostulacion($postulacion, $skill);
 
-        $skill->update([
-            'certificado_nombre_original' => $nuevo['nombre_original'],
-            'certificado_ruta' => $nuevo['ruta'],
-            'certificado_disco' => $nuevo['disco'],
-            'certificado_mime' => $nuevo['mime'],
-            'certificado_tamano_bytes' => $nuevo['tamano_bytes'],
+        $respuesta = $this->guardarCertificado($request, $skill);
+
+        Log::info('Gestión documental del administrador.', [
+            'accion' => 'certificado_reemplazado',
+            'actor_id' => $request->user()?->id,
+            'postulacion_id' => $postulacion->id,
+            'aspirante_id' => $postulacion->user_id,
+            'skill_id' => $skill->id,
         ]);
 
-        $this->borrarArchivo(...$anterior);
-
-        return response()->json(['data' => $this->resumen($skill->fresh())], 200);
+        return $respuesta;
     }
 
     /** Quita el certificado de una skill (la skill se conserva). */
@@ -191,20 +199,26 @@ class PostulacionSkillController extends Controller
         $this->exigirSkillDeLaPostulacion($postulacion, $skill);
         $this->exigirEditable($postulacion, 'skills');
 
-        if ($skill->tieneCertificado()) {
-            $disco = $skill->certificado_disco;
-            $ruta = $skill->certificado_ruta;
+        $this->limpiarCertificado($skill);
 
-            $skill->update([
-                'certificado_nombre_original' => null,
-                'certificado_ruta' => null,
-                'certificado_disco' => null,
-                'certificado_mime' => null,
-                'certificado_tamano_bytes' => null,
-            ]);
+        return response()->json(null, 204);
+    }
 
-            $this->borrarArchivo($disco, $ruta);
-        }
+    /** Gestión documental del admin: quita el certificado sin exigir ventana. */
+    public function quitarCertificadoGestion(Request $request, Postulacion $postulacion, PostulacionSkill $skill): JsonResponse
+    {
+        $this->exigirRevision($request, $postulacion, true);
+        $this->exigirSkillDeLaPostulacion($postulacion, $skill);
+
+        $this->limpiarCertificado($skill);
+
+        Log::info('Gestión documental del administrador.', [
+            'accion' => 'certificado_eliminado',
+            'actor_id' => $request->user()?->id,
+            'postulacion_id' => $postulacion->id,
+            'aspirante_id' => $postulacion->user_id,
+            'skill_id' => $skill->id,
+        ]);
 
         return response()->json(null, 204);
     }
@@ -232,6 +246,51 @@ class PostulacionSkillController extends Controller
         }
     }
 
+    /** Sube o reemplaza el certificado de la skill (dueño y gestor documental). */
+    private function guardarCertificado(Request $request, PostulacionSkill $skill): JsonResponse
+    {
+        $request->validate(['archivo' => $this->reglasArchivo()], $this->mensajes(), $this->atributos());
+
+        $nuevo = $this->guardarArchivo(
+            $request->file('archivo'),
+            "postulaciones/{$skill->postulacion_id}/skills",
+        );
+        $anterior = [$skill->certificado_disco, $skill->certificado_ruta];
+
+        $skill->update([
+            'certificado_nombre_original' => $nuevo['nombre_original'],
+            'certificado_ruta' => $nuevo['ruta'],
+            'certificado_disco' => $nuevo['disco'],
+            'certificado_mime' => $nuevo['mime'],
+            'certificado_tamano_bytes' => $nuevo['tamano_bytes'],
+        ]);
+
+        $this->borrarArchivo(...$anterior);
+
+        return response()->json(['data' => $this->resumen($skill->fresh())], 200);
+    }
+
+    /** Borra el archivo del certificado y deja la skill sin certificado. */
+    private function limpiarCertificado(PostulacionSkill $skill): void
+    {
+        if (! $skill->tieneCertificado()) {
+            return;
+        }
+
+        $disco = $skill->certificado_disco;
+        $ruta = $skill->certificado_ruta;
+
+        $skill->update([
+            'certificado_nombre_original' => null,
+            'certificado_ruta' => null,
+            'certificado_disco' => null,
+            'certificado_mime' => null,
+            'certificado_tamano_bytes' => null,
+        ]);
+
+        $this->borrarArchivo($disco, $ruta);
+    }
+
     private function descargarCertificado(Postulacion $postulacion, PostulacionSkill $skill, bool $inline = false): Response
     {
         $this->exigirSkillDeLaPostulacion($postulacion, $skill);
@@ -240,17 +299,14 @@ class PostulacionSkillController extends Controller
             abort(404, 'Certificado no encontrado.');
         }
 
-        $disco = Storage::disk($skill->certificado_disco);
-
-        if (! $disco->exists($skill->certificado_ruta)) {
-            abort(404, 'Certificado no encontrado.');
-        }
-
-        if ($inline) {
-            return $disco->response($skill->certificado_ruta, $skill->certificado_nombre_original);
-        }
-
-        return $disco->download($skill->certificado_ruta, $skill->certificado_nombre_original);
+        return $this->leerArchivo(
+            $skill->certificado_disco,
+            $skill->certificado_ruta,
+            $skill->certificado_nombre_original,
+            $skill->certificado_mime,
+            $inline,
+            'Certificado no encontrado.',
+        );
     }
 
     private function resumen(PostulacionSkill $skill): array
