@@ -15,6 +15,7 @@ use App\Models\PostulacionDocumento;
 use App\Services\DocumentosDePostulacion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
@@ -64,6 +65,107 @@ class PostulacionDocumentoController extends Controller
         $this->exigirPropia($request, $postulacion);
         $this->exigirEditable($postulacion, 'documentos');
 
+        return $this->guardarRequerido($request, $postulacion);
+    }
+
+    /**
+     * Gestión documental del admin: sube o reemplaza un documento requerido de
+     * un aspirante. No exige ventana ni estado editable a propósito: también se
+     * corrigen borradores y postulaciones ya cerradas. El alcance por ficha lo
+     * impone exigirRevision().
+     */
+    public function storeGestion(Request $request, Postulacion $postulacion): JsonResponse
+    {
+        $this->exigirRevision($request, $postulacion, true);
+
+        $respuesta = $this->guardarRequerido($request, $postulacion);
+
+        $this->auditar($request, 'documento_requerido_reemplazado', $postulacion, [
+            'documento_id' => $respuesta->getData(true)['data']['id'] ?? null,
+        ]);
+
+        return $respuesta;
+    }
+
+    /** Sube un documento ADICIONAL ("tipo otro"): título obligatorio, nota opcional, máx. config. */
+    public function storeAdicional(Request $request, Postulacion $postulacion): JsonResponse
+    {
+        $this->exigirPropia($request, $postulacion);
+        $this->exigirEditable($postulacion, 'documentos');
+
+        return $this->guardarAdicional($request, $postulacion);
+    }
+
+    /**
+     * Gestión documental del admin: agrega un adicional u, opcionalmente,
+     * reemplaza uno existente (`documento_id`). Mismo alcance por ficha.
+     */
+    public function storeAdicionalGestion(Request $request, Postulacion $postulacion): JsonResponse
+    {
+        $this->exigirRevision($request, $postulacion, true);
+
+        $respuesta = $this->guardarAdicional($request, $postulacion);
+
+        $this->auditar($request, 'documento_adicional_gestionado', $postulacion, [
+            'documento_id' => $respuesta->getData(true)['data']['archivo']['id'] ?? null,
+            'reemplazo' => $request->filled('documento_id'),
+        ]);
+
+        return $respuesta;
+    }
+
+    /** Borra un documento (requerido o adicional) de MI postulación. */
+    public function destroy(Request $request, Postulacion $postulacion, PostulacionDocumento $documento): JsonResponse
+    {
+        $this->exigirPropia($request, $postulacion);
+        $this->exigirDocumentoDeLaPostulacion($postulacion, $documento);
+        $this->exigirEditable($postulacion, 'documentos');
+
+        $this->eliminarDocumento($documento);
+
+        return response()->json(null, 204);
+    }
+
+    /**
+     * Gestión documental del admin: borra un documento de un aspirante aunque la
+     * convocatoria esté cerrada o la evaluación haya comenzado.
+     */
+    public function destroyGestion(Request $request, Postulacion $postulacion, PostulacionDocumento $documento): JsonResponse
+    {
+        $this->exigirRevision($request, $postulacion, true);
+        $this->exigirDocumentoDeLaPostulacion($postulacion, $documento);
+
+        $this->eliminarDocumento($documento);
+
+        $this->auditar($request, 'documento_eliminado', $postulacion, [
+            'documento_id' => $documento->id,
+            'nombre_original' => $documento->nombre_original,
+        ]);
+
+        return response()->json(null, 204);
+    }
+
+    /** Entrega el archivo (dueño). Por defecto attachment; ?inline=1 lo deja en la pestaña. */
+    public function archivo(Request $request, Postulacion $postulacion, PostulacionDocumento $documento): Response
+    {
+        $this->exigirPropia($request, $postulacion);
+
+        return $this->descargar($postulacion, $documento, $request->boolean('inline'));
+    }
+
+    /** Entrega el archivo (revisor con 'documentos:ver'). Igual que archivo(): ?inline=1. */
+    public function archivoRevision(Request $request, Postulacion $postulacion, PostulacionDocumento $documento): Response
+    {
+        $this->exigirRevision($request, $postulacion);
+
+        return $this->descargar($postulacion, $documento, $request->boolean('inline'));
+    }
+
+    // ── Escritura compartida (dueño y gestor documental) ────────────────
+
+    /** Sube o reemplaza el documento requerido del código indicado. */
+    private function guardarRequerido(Request $request, Postulacion $postulacion): JsonResponse
+    {
         $datos = $request->validate([
             'codigo' => ['required', 'string'],
             'archivo' => $this->reglasArchivo(),
@@ -108,29 +210,45 @@ class PostulacionDocumentoController extends Controller
         return response()->json(['data' => $this->archivoResumen($documento)], $codigoHttp);
     }
 
-    /** Sube un documento ADICIONAL ("tipo otro"): título obligatorio, nota opcional, máx. config. */
-    public function storeAdicional(Request $request, Postulacion $postulacion): JsonResponse
+    /**
+     * Agrega un adicional. Con `documento_id` reemplaza el archivo (y el
+     * título/nota si se envían) de ese adicional existente, sin gastar cupo.
+     */
+    private function guardarAdicional(Request $request, Postulacion $postulacion): JsonResponse
     {
-        $this->exigirPropia($request, $postulacion);
-        $this->exigirEditable($postulacion, 'documentos');
-
         $maxAdicionales = (int) config('convocatorias.documentos_adicionales_max');
 
         $datos = $request->validate([
+            'documento_id' => ['nullable', 'integer'],
             'titulo' => ['required', 'string', 'max:'.config('convocatorias.titulo_adicional_max_longitud')],
             'nota' => ['nullable', 'string', 'max:'.config('convocatorias.nota_adicional_max_longitud')],
             'archivo' => $this->reglasArchivo(),
         ], $this->mensajes(), $this->atributos());
 
-        $actuales = PostulacionDocumento::query()
-            ->where('postulacion_id', $postulacion->id)
-            ->whereNull('parametro_id')
-            ->count();
+        $reemplazo = null;
 
-        if ($actuales >= $maxAdicionales) {
-            throw ValidationException::withMessages([
-                'titulo' => "No puedes agregar más de {$maxAdicionales} documentos adicionales.",
-            ]);
+        if (! empty($datos['documento_id'])) {
+            $reemplazo = PostulacionDocumento::query()
+                ->where('postulacion_id', $postulacion->id)
+                ->whereNull('parametro_id')
+                ->find($datos['documento_id']);
+
+            if (! $reemplazo) {
+                throw ValidationException::withMessages([
+                    'documento_id' => 'Ese documento adicional no existe en esta postulación.',
+                ]);
+            }
+        } else {
+            $actuales = PostulacionDocumento::query()
+                ->where('postulacion_id', $postulacion->id)
+                ->whereNull('parametro_id')
+                ->count();
+
+            if ($actuales >= $maxAdicionales) {
+                throw ValidationException::withMessages([
+                    'titulo' => "No puedes agregar más de {$maxAdicionales} documentos adicionales.",
+                ]);
+            }
         }
 
         $nuevo = $this->guardarArchivo(
@@ -138,45 +256,51 @@ class PostulacionDocumentoController extends Controller
             "postulaciones/{$postulacion->id}/adicionales",
         );
 
-        $documento = PostulacionDocumento::create($nuevo + [
-            'postulacion_id' => $postulacion->id,
-            'parametro_id' => null,
+        $campos = $nuevo + [
             'titulo' => $datos['titulo'],
             'nota' => $datos['nota'] ?? null,
-        ]);
+        ];
 
-        return response()->json(['data' => $this->adicionalResumen($documento)], 201);
+        if ($reemplazo) {
+            $anterior = [$reemplazo->disco, $reemplazo->ruta];
+            $reemplazo->update($campos);
+            $this->borrarArchivo(...$anterior);
+            $documento = $reemplazo->fresh();
+            $codigoHttp = 200;
+        } else {
+            $documento = PostulacionDocumento::create($campos + [
+                'postulacion_id' => $postulacion->id,
+                'parametro_id' => null,
+            ]);
+            $codigoHttp = 201;
+        }
+
+        return response()->json(['data' => $this->adicionalResumen($documento)], $codigoHttp);
     }
 
-    /** Borra un documento (requerido o adicional) de MI postulación. */
-    public function destroy(Request $request, Postulacion $postulacion, PostulacionDocumento $documento): JsonResponse
+    /** Borra la fila y su archivo físico. */
+    private function eliminarDocumento(PostulacionDocumento $documento): void
     {
-        $this->exigirPropia($request, $postulacion);
-        $this->exigirDocumentoDeLaPostulacion($postulacion, $documento);
-        $this->exigirEditable($postulacion, 'documentos');
-
         $disco = $documento->disco;
         $ruta = $documento->ruta;
         $documento->delete();
         $this->borrarArchivo($disco, $ruta);
-
-        return response()->json(null, 204);
     }
 
-    /** Entrega el archivo (dueño). Por defecto attachment; ?inline=1 lo deja en la pestaña. */
-    public function archivo(Request $request, Postulacion $postulacion, PostulacionDocumento $documento): Response
+    /**
+     * Rastro de la gestión documental del admin: quién tocó qué documento de
+     * quién. Las acciones sobre archivos ajenos nunca deben ser anónimas.
+     *
+     * @param array<string, mixed> $contexto
+     */
+    private function auditar(Request $request, string $accion, Postulacion $postulacion, array $contexto = []): void
     {
-        $this->exigirPropia($request, $postulacion);
-
-        return $this->descargar($postulacion, $documento, $request->boolean('inline'));
-    }
-
-    /** Entrega el archivo (revisor con 'documentos:ver'). Igual que archivo(): ?inline=1. */
-    public function archivoRevision(Request $request, Postulacion $postulacion, PostulacionDocumento $documento): Response
-    {
-        $this->exigirRevision($request, $postulacion);
-
-        return $this->descargar($postulacion, $documento, $request->boolean('inline'));
+        Log::info('Gestión documental del administrador.', $contexto + [
+            'accion' => $accion,
+            'actor_id' => $request->user()?->id,
+            'postulacion_id' => $postulacion->id,
+            'aspirante_id' => $postulacion->user_id,
+        ]);
     }
 
     // ── Reglas de acceso ───────────────────────────────────────────────
@@ -227,19 +351,15 @@ class PostulacionDocumentoController extends Controller
     {
         $this->exigirDocumentoDeLaPostulacion($postulacion, $documento);
 
-        $disco = Storage::disk($documento->disco);
-
-        if (! $disco->exists($documento->ruta)) {
-            abort(404, 'Documento no encontrado.');
-        }
-
         // inline: el navegador lo muestra en la pestaña (Visor PDF del front).
         // attachment: descarga clásica, el comportamiento histórico.
-        if ($inline) {
-            return $disco->response($documento->ruta, $documento->nombre_original);
-        }
-
-        return $disco->download($documento->ruta, $documento->nombre_original);
+        return $this->leerArchivo(
+            $documento->disco,
+            $documento->ruta,
+            $documento->nombre_original,
+            $documento->mime,
+            $inline,
+        );
     }
 
     // ── Presentación ───────────────────────────────────────────────────
