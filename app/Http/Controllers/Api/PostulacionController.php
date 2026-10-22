@@ -6,10 +6,12 @@ use App\Enums\ConvocatoriaEstado;
 use App\Enums\PostulacionEstado;
 use App\Enums\Role;
 use App\Enums\VentanaPostulacion;
+use App\Http\Controllers\Api\Concerns\IdentificadorConvocatoria;
 use App\Http\Controllers\Controller;
 use App\Models\Convocatoria;
 use App\Models\Parametro;
 use App\Models\Postulacion;
+use App\Models\User;
 use App\Services\DocumentosDePostulacion;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
@@ -40,6 +42,8 @@ use Illuminate\Validation\ValidationException;
  */
 class PostulacionController extends Controller
 {
+    use IdentificadorConvocatoria;
+
     /**
      * "Mis postulaciones": listado paginado de las postulaciones del autenticado.
      * SIEMPRE se filtra por su user_id, sea cual sea el rol: un instructor o un
@@ -63,7 +67,7 @@ class PostulacionController extends Controller
 
         return response()->json([
             'data' => $listado->getCollection()
-                ->map(fn (Postulacion $p) => $this->presentar($p))
+                ->map(fn (Postulacion $p) => $this->presentar($p, $request->user()))
                 ->values(),
             'meta' => [
                 'current_page' => $listado->currentPage(),
@@ -132,7 +136,7 @@ class PostulacionController extends Controller
             }
 
             return response()->json([
-                'data' => $this->presentar($previa->fresh(['estado', 'convocatoria.estado'])),
+                'data' => $this->presentar($previa->fresh(['estado', 'convocatoria.estado']), $request->user()),
             ]);
         }
 
@@ -156,7 +160,7 @@ class PostulacionController extends Controller
         }
 
         return response()->json([
-            'data' => $this->presentar($nueva->load(['estado', 'convocatoria.estado'])),
+            'data' => $this->presentar($nueva->load(['estado', 'convocatoria.estado']), $request->user()),
         ], 201);
     }
 
@@ -256,7 +260,7 @@ class PostulacionController extends Controller
         }
 
         return response()->json([
-            'data' => $this->presentar($postulacion->fresh(['estado', 'convocatoria.estado'])),
+            'data' => $this->presentar($postulacion->fresh(['estado', 'convocatoria.estado']), $request->user()),
         ]);
     }
 
@@ -321,7 +325,7 @@ class PostulacionController extends Controller
         }
 
         return response()->json([
-            'data' => $this->presentar($postulacion->fresh(['estado', 'convocatoria.estado'])),
+            'data' => $this->presentar($postulacion->fresh(['estado', 'convocatoria.estado']), $request->user()),
         ]);
     }
 
@@ -381,23 +385,29 @@ class PostulacionController extends Controller
 
     // ── Presentación ───────────────────────────────────────────────────
 
-    private function presentar(Postulacion $postulacion): array
+    private function presentar(Postulacion $postulacion, User $user): array
     {
         return [
             'id' => $postulacion->id,
             'estado' => $this->parametro($postulacion->estado),
             'fecha_postulacion' => $postulacion->fecha_postulacion?->toIso8601String(),
             'fecha_retiro' => $postulacion->fecha_retiro?->toIso8601String(),
-            'convocatoria' => $this->resumenConvocatoria($postulacion->convocatoria),
+            'convocatoria' => $this->resumenConvocatoria($postulacion->convocatoria, $user),
         ];
     }
 
-    /** Resumen embebido: permite mostrar la tarjeta sin pedir el detalle. */
-    private function resumenConvocatoria(Convocatoria $convocatoria): array
+    /**
+     * Resumen embebido: permite mostrar la tarjeta sin pedir el detalle.
+     *
+     * El `codigo` (CONV-AAAA-NNN) es un dato de gestión: solo lo recibe quien
+     * está en la lista blanca (instructor, super admin y el subrol
+     * gestor_convocatorias). Para el resto llega en null.
+     */
+    private function resumenConvocatoria(Convocatoria $convocatoria, User $user): array
     {
         return [
             'id' => $convocatoria->id,
-            'codigo' => $convocatoria->codigo,
+            'codigo' => $this->veIdentificadorConvocatoria($user) ? $convocatoria->codigo : null,
             'nombre' => $convocatoria->nombre,
             'cargo' => $convocatoria->cargo,
             'area' => $convocatoria->area,
