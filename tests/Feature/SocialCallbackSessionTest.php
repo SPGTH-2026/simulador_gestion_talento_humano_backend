@@ -41,6 +41,16 @@ class SocialCallbackSessionTest extends TestCase
         Socialite::shouldReceive('driver')->andReturn($provider);
     }
 
+    /** Igual que fakeSocialite(), pero el canje del código falla (invalid_grant). */
+    private function fakeSocialiteConError(string $mensaje = 'Malformed auth code.'): void
+    {
+        $provider = \Mockery::mock(Provider::class);
+        $provider->shouldReceive('stateless')->andReturnSelf();
+        $provider->shouldReceive('user')->andThrow(new \RuntimeException($mensaje));
+
+        Socialite::shouldReceive('driver')->andReturn($provider);
+    }
+
     public function test_callback_google_nuevo_crea_aspirante_verificado_sin_otp(): void
     {
         $this->fakeSocialite();
@@ -155,5 +165,70 @@ class SocialCallbackSessionTest extends TestCase
         $response->assertRedirect();
         $this->assertStringContainsString('error=desactivado', $response->headers->get('Location'));
         $this->assertGuest();
+    }
+
+    public function test_el_redirect_guarda_el_estado_en_la_sesion(): void
+    {
+        // El flujo de Google es stateful: el 'state' se guarda en la sesión
+        // para poder validarlo en el callback (protección CSRF).
+        $response = $this->get('/api/auth/google/redirect');
+
+        $response->assertRedirect();
+
+        $estado = session('state');
+        $this->assertNotEmpty($estado);
+        $this->assertStringContainsString('state='.$estado, $response->headers->get('Location'));
+    }
+
+    public function test_callback_con_estado_valido_inicia_sesion(): void
+    {
+        $this->fakeSocialite();
+
+        $response = $this->withSession(['state' => 'estado-123'])
+            ->get('/api/auth/google/callback?code=codigo&state=estado-123');
+
+        $response->assertRedirect();
+        $this->assertSame(config('app.frontend_url'), $response->headers->get('Location'));
+        $this->assertAuthenticated();
+    }
+
+    public function test_callback_con_estado_que_no_coincide_avisa_y_no_entra(): void
+    {
+        // Código reenviado (doble clic, botón atrás): el estado no cuadra.
+        $this->fakeSocialite();
+
+        $response = $this->withSession(['state' => 'estado-123'])
+            ->get('/api/auth/google/callback?code=codigo&state=otro-estado');
+
+        $response->assertRedirect();
+        $this->assertStringContainsString('error=oauth_codigo', $response->headers->get('Location'));
+        $this->assertGuest();
+    }
+
+    public function test_codigo_ya_usado_muestra_error_amigable_y_no_500(): void
+    {
+        // Google responde invalid_grant: el código ya se gastó.
+        $this->fakeSocialiteConError('Malformed auth code.');
+
+        $response = $this->get('/api/auth/google/callback?code=codigo');
+
+        $response->assertRedirect();
+        $this->assertStringContainsString('error=oauth_codigo', $response->headers->get('Location'));
+        $this->assertGuest();
+    }
+
+    public function test_codigo_ya_usado_con_sesion_abierta_continua_al_front(): void
+    {
+        // El usuario ya entró con el primer clic; el segundo callback falla
+        // pero no debe dejarle fuera: se le lleva al front.
+        $user = User::factory()->create(['email' => 'ana.'.getmypid().'@test.com']);
+
+        $this->fakeSocialiteConError('Malformed auth code.');
+
+        $response = $this->actingAs($user)->get('/api/auth/google/callback?code=codigo');
+
+        $response->assertRedirect();
+        $this->assertSame(config('app.frontend_url'), $response->headers->get('Location'));
+        $this->assertAuthenticatedAs($user);
     }
 }
