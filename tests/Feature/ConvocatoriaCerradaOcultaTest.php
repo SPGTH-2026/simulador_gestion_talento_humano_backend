@@ -251,6 +251,22 @@ class ConvocatoriaCerradaOcultaTest extends TestCase
             ->getJson("/api/convocatorias/{$c['vencida']->id}")->assertOk();
     }
 
+    /**
+     * Cierra la tabla de detalle por rol: al super admin le llega igual que al
+     * instructor (200) y el evaluador no puede ni pedirla (403 por permiso).
+     */
+    public function test_el_super_admin_ve_la_cerrada_y_el_evaluador_recibe_403_en_el_detalle(): void
+    {
+        $ficha = $this->ficha();
+        $c = $this->cuatroConvocatorias($ficha, $this->instructor($ficha));
+
+        $this->actingAs($this->usuario(Role::SuperAdmin))
+            ->getJson("/api/convocatorias/{$c['cerrada']->id}")->assertOk();
+
+        $this->actingAs($this->aprendiz($ficha, 'evaluador'))
+            ->getJson("/api/convocatorias/{$c['cerrada']->id}")->assertForbidden();
+    }
+
     // ── Mis postulaciones ───────────────────────────────────────────────
 
     public function test_mis_postulaciones_sigue_mostrando_la_convocatoria_cerrada_del_aspirante(): void
