@@ -26,6 +26,16 @@ trait IdentificadorConvocatoria
 {
     protected function veIdentificadorConvocatoria(User $user): bool
     {
+        return $this->esGestorDeConvocatorias($user);
+    }
+
+    /**
+     * Predicado estricto de gestión de convocatorias: el permiso Y la lista
+     * blanca de rol/subrol (instructor, super admin, gestor_convocatorias).
+     * Lo usan el identificador y la visibilidad de convocatorias cerradas.
+     */
+    protected function esGestorDeConvocatorias(User $user): bool
+    {
         if (! $user->can('convocatorias:gestionar')) {
             return false;
         }

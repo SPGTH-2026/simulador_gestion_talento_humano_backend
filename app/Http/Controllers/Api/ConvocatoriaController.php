@@ -82,8 +82,20 @@ class ConvocatoriaController extends Controller
         if (! $esGestor) {
             // El aspirante solo ve las publicadas.
             $query->where('estado_id', $this->parametroId('estado_convocatoria', ConvocatoriaEstado::Publicada->value));
+
+            // Filtrar por otro estado no le devuelve nada.
+            if (($datos['estado'] ?? null) !== null && $datos['estado'] !== ConvocatoriaEstado::Publicada->value) {
+                $query->whereRaw('1 = 0');
+            }
         } elseif (($datos['estado'] ?? null) !== null) {
             $query->where('estado_id', $this->parametroId('estado_convocatoria', $datos['estado']));
+        }
+
+        // Quien no gestiona no ve las cerradas (estado cerrada o publicada con la
+        // fecha de cierre ya pasada). Se filtra ANTES de paginar: conteos y
+        // páginas coinciden.
+        if (! $this->esGestorDeConvocatorias($user)) {
+            $this->excluirCerradas($query);
         }
 
         // Filtro por ficha del alcance (lo usan super admin e instructor cuando
@@ -1123,6 +1135,42 @@ class ConvocatoriaController extends Controller
             && $convocatoria->estado?->codigo !== ConvocatoriaEstado::Publicada->value) {
             abort(404, 'Convocatoria no encontrada.');
         }
+
+        if (! $this->esGestorDeConvocatorias($user) && $this->estaCerrada($convocatoria)) {
+            abort(404, 'Convocatoria no encontrada.');
+        }
+    }
+
+    /**
+     * Cerrada para quien no gestiona: estado 'cerrada', o 'publicada' con la
+     * fecha de cierre pasada (mismo día que Convocatoria::ventanaPostulacion,
+     * en America/Bogota). Sin fecha de cierre no se considera cerrada.
+     */
+    private function estaCerrada(Convocatoria $convocatoria): bool
+    {
+        $codigo = $convocatoria->estado?->codigo;
+
+        if ($codigo === ConvocatoriaEstado::Cerrada->value) {
+            return true;
+        }
+
+        return $codigo === ConvocatoriaEstado::Publicada->value
+            && $convocatoria->fecha_cierre !== null
+            && $convocatoria->fecha_cierre->toDateString() < now('America/Bogota')->toDateString();
+    }
+
+    /** Quita de la consulta las cerradas (ver estaCerrada), en SQL y antes de paginar. */
+    private function excluirCerradas(Builder $query): void
+    {
+        $hoy = now('America/Bogota')->toDateString();
+
+        $query
+            ->where('estado_id', '!=', $this->parametroId('estado_convocatoria', ConvocatoriaEstado::Cerrada->value))
+            ->where(function (Builder $sub) use ($hoy) {
+                $sub->where('estado_id', '!=', $this->parametroId('estado_convocatoria', ConvocatoriaEstado::Publicada->value))
+                    ->orWhereNull('fecha_cierre')
+                    ->orWhereDate('fecha_cierre', '>=', $hoy);
+            });
     }
 
     /** Id de un parámetro por tema+código, o 500 si falta el seeder. */

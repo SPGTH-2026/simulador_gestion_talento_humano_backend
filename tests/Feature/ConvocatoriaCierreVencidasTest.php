@@ -187,7 +187,7 @@ class ConvocatoriaCierreVencidasTest extends TestCase
         $this->assertSame('en_proceso', $convocatoria->fresh()->estado?->codigo);
     }
 
-    public function test_el_aspirante_deja_de_ver_la_convocatoria_cerrada(): void
+    public function test_el_aspirante_no_ve_la_convocatoria_con_cierre_vencido_ni_antes_ni_despues_del_comando(): void
     {
         $ficha = $this->ficha();
         $instructor = $this->instructor($ficha);
@@ -196,7 +196,7 @@ class ConvocatoriaCierreVencidasTest extends TestCase
         $this->conEstadoYCierre($ficha, $instructor, 'publicada', now('America/Bogota')->subDay()->toDateString());
 
         $antes = $this->actingAs($aspirante)->getJson('/api/convocatorias')->assertOk();
-        $this->assertCount(1, $antes->json('data'));
+        $this->assertCount(0, $antes->json('data'));
 
         $this->artisan('convocatorias:cerrar-vencidas')->assertSuccessful();
 
