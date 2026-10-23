@@ -29,7 +29,7 @@ use Symfony\Component\HttpFoundation\Response;
  *   documentos y adicionales. Una postulación ajena o inexistente -> 404.
  * - Solo se edita con la convocatoria publicada y dentro de la ventana, y con la
  *   postulación en 'borrador' (antes de enviar) o 'postulada' (después). Una
- *   'retirada' queda bloqueada hasta reabrirla.
+ *   'retirada' también es editable mientras la ventana esté abierta.
  * - El envío (PostulacionController::enviar) exige los obligatorios completos;
  *   aquí el campo `completo` se calcula con DocumentosDePostulacion, la misma
  *   regla que valida el envío.

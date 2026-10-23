@@ -23,7 +23,7 @@ use Symfony\Component\HttpFoundation\Response;
  * - El certificado es OPCIONAL por skill (declarada vs. certificada) y se
  *   sube/reemplaza/borra con endpoints propios.
  * - Mismas reglas de acceso que los documentos: dueño (404 si es ajena),
- *   editable solo dentro de la ventana y en estado 'postulada', y lectura de
+ *   editable solo dentro de la ventana (borrador, postulada o retirada), y lectura de
  *   revisores con permiso 'documentos:ver' con alcance por ficha.
  *
  * Las filas ya declaradas antes de este cambio (origen 'catalogo' o 'propia')

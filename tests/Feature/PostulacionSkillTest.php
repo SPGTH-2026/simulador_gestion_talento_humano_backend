@@ -496,7 +496,7 @@ class PostulacionSkillTest extends TestCase
             ->assertJsonPath('message', 'Postulación no encontrada.');
     }
 
-    public function test_no_se_puede_declarar_skills_en_postulacion_retirada(): void
+    public function test_se_puede_declarar_skills_en_postulacion_retirada_dentro_de_la_ventana(): void
     {
         $ficha = $this->ficha();
         $instructor = $this->instructor($ficha);
@@ -510,8 +510,12 @@ class PostulacionSkillTest extends TestCase
 
         $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['convocatoria_skill_id' => $skill->id])
-            ->assertStatus(422)
-            ->assertJsonPath('errors.skills.0', 'Tu postulación está retirada. Reactívala para editar documentos.');
+            ->assertCreated();
+
+        $this->assertSame(
+            $this->parametroId('estado_postulacion', 'retirada'),
+            $postulacion->fresh()->estado_id,
+        );
     }
 
     public function test_revisor_puede_descargar_el_certificado(): void

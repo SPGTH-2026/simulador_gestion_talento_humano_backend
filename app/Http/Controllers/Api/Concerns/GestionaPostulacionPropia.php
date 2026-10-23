@@ -32,10 +32,12 @@ trait GestionaPostulacionPropia
 
     /**
      * Determina si la postulación es editable según las reglas de negocio:
-     * - Borrador: solo dentro de la ventana de recepción (apertura..cierre).
+     * - Borrador y Retirada: solo dentro de la ventana de recepción
+     *   (apertura..cierre). Una retirada sigue siendo editable por su dueño y
+     *   editar NO cambia el estado: sigue retirada hasta que la reactive.
      * - Postulada: convocatoria publicada, después de apertura, y antes de fecha_evaluacion (si existe).
-     * - Retirada: nunca editable.
-     * - Convocatoria no publicada: no editable (404 en exigirEditable).
+     * - Convocatoria no publicada: no editable (404 en exigirEditable, salvo
+     *   retirada, que recibe 422 con el motivo).
      */
     private function puedeEditar(Postulacion $postulacion): bool
     {
@@ -53,7 +55,7 @@ trait GestionaPostulacionPropia
 
         $codigo = $postulacion->estado?->codigo;
 
-        if ($codigo === PostulacionEstado::Borrador->value) {
+        if ($codigo === PostulacionEstado::Borrador->value || $codigo === PostulacionEstado::Retirada->value) {
             return $convocatoria->ventanaPostulacion() === VentanaPostulacion::Abierta;
         }
 
@@ -86,7 +88,13 @@ trait GestionaPostulacionPropia
         $codigo = $postulacion->estado?->codigo;
 
         if ($codigo === PostulacionEstado::Retirada->value) {
-            return 'Tu postulación está retirada. Reactívala para editar documentos.';
+            if ($convocatoria->ventanaPostulacion() !== VentanaPostulacion::Abierta) {
+                return 'La convocatoria ya cerró el '
+                    .$convocatoria->fecha_cierre?->toDateString()
+                    .'. Tu postulación retirada queda solo para consulta.';
+            }
+
+            return '';
         }
 
         if ($codigo === PostulacionEstado::Borrador->value) {
@@ -123,9 +131,16 @@ trait GestionaPostulacionPropia
             return;
         }
 
-        $postulacion->loadMissing(['convocatoria.estado']);
+        $postulacion->loadMissing(['convocatoria.estado', 'estado']);
 
-        if ($postulacion->convocatoria->estado?->codigo !== 'publicada') {
+        // La postulación ajena ya se filtró con 404 en exigirPropia(). Aquí el
+        // dueño de una retirada siempre recibe el motivo (422), aunque la
+        // convocatoria haya pasado a proceso o cerrada: es SU postulación y
+        // necesita saber por qué no puede editar. Las demás conservan el 404
+        // histórico cuando la convocatoria no está publicada.
+        $esRetirada = $postulacion->estado?->codigo === PostulacionEstado::Retirada->value;
+
+        if (! $esRetirada && $postulacion->convocatoria->estado?->codigo !== 'publicada') {
             abort(404, 'Postulación no encontrada.');
         }
 

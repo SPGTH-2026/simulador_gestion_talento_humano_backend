@@ -118,8 +118,8 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
     // 'propio:documentos' lo tienen aspirante, instructor y super admin: cada
     // quien edita SOLO lo suyo (filtro por user_id en el controlador). Una
     // postulación ajena o inexistente -> 404 en español. Estos pasos se editan
-    // con la convocatoria abierta y la postulación en 'borrador' o 'postulada'
-    // (no retirada).
+    // con la convocatoria publicada y dentro de la ventana, en 'borrador',
+    // 'postulada' o 'retirada'.
     Route::middleware('can:propio:documentos')->group(function () {
         // Perfil mínimo del aspirante (sexo), prellenado entre postulaciones.
         // Elegir el sexo NO crea postulación: es del perfil del usuario.

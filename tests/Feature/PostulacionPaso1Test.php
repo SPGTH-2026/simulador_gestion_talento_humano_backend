@@ -190,7 +190,7 @@ class PostulacionPaso1Test extends TestCase
             PostulacionEstado::transiciones()['postulada']
         );
         $this->assertSame(
-            ['borrador'],
+            ['borrador', 'postulada'],
             PostulacionEstado::transiciones()['retirada']
         );
     }
