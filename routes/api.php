@@ -171,6 +171,29 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
         Route::get('postulaciones/{postulacion}/skills/{skill}/certificado/archivo', [PostulacionSkillController::class, 'certificadoRevision'])
             ->whereNumber('postulacion')->whereNumber('skill')
             ->missing(fn () => abort(404, 'Postulación no encontrada.'));
+
+        // Gestión documental del admin (permiso 'documentos:gestionar'): el super
+        // admin y el instructor corrigen documentos de los aspirantes de sus
+        // fichas incluso con la convocatoria cerrada o la evaluación iniciada.
+        // Al ser escrituras, las rutas NO usan el sufijo /archivo: el reemplazo
+        // se hace por código (requeridos) o por documento_id (adicionales).
+        Route::middleware('can:documentos:gestionar')->group(function () {
+            Route::post('postulaciones/{postulacion}/documentos', [PostulacionDocumentoController::class, 'storeGestion'])
+                ->whereNumber('postulacion')
+                ->missing(fn () => abort(404, 'Postulación no encontrada.'));
+            Route::post('postulaciones/{postulacion}/documentos/adicionales', [PostulacionDocumentoController::class, 'storeAdicionalGestion'])
+                ->whereNumber('postulacion')
+                ->missing(fn () => abort(404, 'Postulación no encontrada.'));
+            Route::delete('postulaciones/{postulacion}/documentos/{documento}', [PostulacionDocumentoController::class, 'destroyGestion'])
+                ->whereNumber('postulacion')->whereNumber('documento')
+                ->missing(fn () => abort(404, 'Postulación no encontrada.'));
+            Route::post('postulaciones/{postulacion}/skills/{skill}/certificado', [PostulacionSkillController::class, 'certificadoGestion'])
+                ->whereNumber('postulacion')->whereNumber('skill')
+                ->missing(fn () => abort(404, 'Postulación no encontrada.'));
+            Route::delete('postulaciones/{postulacion}/skills/{skill}/certificado', [PostulacionSkillController::class, 'quitarCertificadoGestion'])
+                ->whereNumber('postulacion')->whereNumber('skill')
+                ->missing(fn () => abort(404, 'Postulación no encontrada.'));
+        });
     });
 
     // Portafolio documental de un usuario (permiso 'documentos:ver'): sus

@@ -21,7 +21,11 @@ class SocialAuthController extends Controller
     {
         abort_unless(in_array($provider, self::PROVIDERS, true), 404);
 
-        return Socialite::driver($provider)->stateless()->redirect();
+        // Con estado: el 'state' se guarda en la sesión y se valida en el
+        // callback. Si la sesión no llega al callback (front y back en
+        // dominios distintos) el callback sigue funcionando en modo
+        // stateless; ver usuarioSocialite().
+        return Socialite::driver($provider)->redirect();
     }
 
     public function callback(Request $request, string $provider): RedirectResponse
@@ -30,11 +34,24 @@ class SocialAuthController extends Controller
         $front = rtrim(config('app.frontend_url'), '/');
 
         try {
-            $social = Socialite::driver($provider)->stateless()->user();
+            $social = $this->usuarioSocialite($request, $provider);
         } catch (\Throwable $e) {
-            Log::error('Social login error: '.$e->getMessage());
+            // Lo más común es que el código ya se haya gastado: doble clic en
+            // "Entrar con Google", botón atrás o recargar el callback. Google
+            // responde invalid_grant y no hay nada que recuperar, pero el
+            // usuario ya tiene sesión: se le lleva al front en vez de
+            // mostrarle un error.
+            if (Auth::guard('web')->check()) {
+                return redirect($front);
+            }
 
-            return redirect("$front/login?error=oauth");
+            Log::warning('No se pudo completar el inicio de sesión con Google.', [
+                'provider' => $provider,
+                'motivo' => $e->getMessage(),
+                'url' => $request->fullUrl(),
+            ]);
+
+            return redirect("$front/login?error=oauth_codigo");
         }
 
         $account = SocialAccount::where('provider', $provider)->where('provider_id', (string) $social->getId())->first();
@@ -85,5 +102,31 @@ class SocialAuthController extends Controller
 
         // El front decide qué hacer según el perfil (ej. completar la ficha).
         return redirect($front);
+    }
+
+    /**
+     * Usuario de Google del callback.
+     *
+     * El flujo normal es CON estado: el 'state' se guardó en la sesión al
+     * redirigir y aquí se valida (protección CSRF). Si la sesión no llegó al
+     * callback —típico cuando el front y el back se sirven en dominios
+     * distintos— se sigue en modo stateless: el código de Google sigue
+     * siendo de un solo uso y está atado a nuestro client_id y redirect_uri.
+     */
+    private function usuarioSocialite(Request $request, string $provider): \Laravel\Socialite\Two\User
+    {
+        $driver = Socialite::driver($provider);
+        $estadoSesion = (string) $request->session()->get('state', '');
+        $estadoUrl = (string) $request->input('state', '');
+
+        if ($estadoSesion === '') {
+            return $driver->stateless()->user();
+        }
+
+        if ($estadoUrl === '' || ! hash_equals($estadoSesion, $estadoUrl)) {
+            throw new \RuntimeException('El estado de la autenticación no coincide.');
+        }
+
+        return $driver->user();
     }
 }
