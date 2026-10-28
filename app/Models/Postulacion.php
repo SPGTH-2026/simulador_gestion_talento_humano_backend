@@ -55,4 +55,10 @@ class Postulacion extends Model
     {
         return $this->hasMany(PostulacionSkill::class);
     }
+
+    /** Evaluaciones recibidas sobre esta postulación (módulo de Evaluación). */
+    public function evaluaciones(): HasMany
+    {
+        return $this->hasMany(Evaluacion::class);
+    }
 }
