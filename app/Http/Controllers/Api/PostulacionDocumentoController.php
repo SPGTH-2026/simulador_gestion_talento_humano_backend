@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Enums\PostulacionEstado;
 use App\Enums\VentanaPostulacion;
 use App\Http\Controllers\Api\Concerns\GestionaPostulacionPropia;
+use App\Http\Controllers\Api\Concerns\IdentificadorConvocatoria;
 use App\Http\Controllers\Controller;
 use App\Models\Convocatoria;
 use App\Models\ConvocatoriaSkill;
@@ -12,6 +13,7 @@ use App\Models\Parametro;
 use App\Models\PerfilAspirante;
 use App\Models\Postulacion;
 use App\Models\PostulacionDocumento;
+use App\Models\User;
 use App\Services\DocumentosDePostulacion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -27,7 +29,7 @@ use Symfony\Component\HttpFoundation\Response;
  *   documentos y adicionales. Una postulación ajena o inexistente -> 404.
  * - Solo se edita con la convocatoria publicada y dentro de la ventana, y con la
  *   postulación en 'borrador' (antes de enviar) o 'postulada' (después). Una
- *   'retirada' queda bloqueada hasta reabrirla.
+ *   'retirada' también es editable mientras la ventana esté abierta.
  * - El envío (PostulacionController::enviar) exige los obligatorios completos;
  *   aquí el campo `completo` se calcula con DocumentosDePostulacion, la misma
  *   regla que valida el envío.
@@ -37,6 +39,7 @@ use Symfony\Component\HttpFoundation\Response;
 class PostulacionDocumentoController extends Controller
 {
     use GestionaPostulacionPropia;
+    use IdentificadorConvocatoria;
 
     /** Estado de documentos de MI postulación (dueño). */
     public function show(Request $request, Postulacion $postulacion, DocumentosDePostulacion $documentos): JsonResponse
@@ -44,7 +47,7 @@ class PostulacionDocumentoController extends Controller
         $this->exigirPropia($request, $postulacion);
 
         return response()->json([
-            'data' => $this->presentarEstado($postulacion, $this->esEditable($postulacion), $documentos),
+            'data' => $this->presentarEstado($postulacion, $this->esEditable($postulacion), $documentos, $request->user()),
         ]);
     }
 
@@ -53,7 +56,9 @@ class PostulacionDocumentoController extends Controller
     {
         $this->exigirRevision($request, $postulacion);
 
-        return response()->json(['data' => $this->presentarEstado($postulacion, false, $documentos)]);
+        return response()->json([
+            'data' => $this->presentarEstado($postulacion, false, $documentos, $request->user()),
+        ]);
     }
 
     /**
@@ -364,7 +369,7 @@ class PostulacionDocumentoController extends Controller
 
     // ── Presentación ───────────────────────────────────────────────────
 
-    private function presentarEstado(Postulacion $postulacion, bool $editable, DocumentosDePostulacion $documentosService): array
+    private function presentarEstado(Postulacion $postulacion, bool $editable, DocumentosDePostulacion $documentosService, User $user): array
     {
         $postulacion->load([
             'estado',
@@ -432,7 +437,7 @@ class PostulacionDocumentoController extends Controller
                     'nombre' => $postulacion->estado?->nombre,
                 ],
             ],
-            'convocatoria' => $this->convocatoriaResumen($postulacion->convocatoria),
+            'convocatoria' => $this->convocatoriaResumen($postulacion->convocatoria, $user),
             'ventana' => $postulacion->convocatoria->ventanaPostulacion()->value,
             'editable' => $editable,
             'motivo_edicion' => $editable ? null : $this->motivoNoEditable($postulacion),
@@ -455,15 +460,19 @@ class PostulacionDocumentoController extends Controller
     }
 
     /**
-     * Resumen mínimo de la convocatoria para encabezar el paso en el front. El
-     * `codigo` es la identidad de negocio (CONV-AAAA-NNN).
+     * Resumen mínimo de la convocatoria para encabezar el paso en el front.
+     *
+     * El `codigo` (CONV-AAAA-NNN) es un dato de GESTIÓN: solo lo recibe quien
+     * está en la lista blanca (el revisor: instructor, super admin o el
+     * subrol gestor_convocatorias). Para el dueño de la postulación llega en
+     * null.
      */
-    private function convocatoriaResumen(Convocatoria $convocatoria): array
+    private function convocatoriaResumen(Convocatoria $convocatoria, User $user): array
     {
         return [
             'id' => $convocatoria->id,
             'nombre' => $convocatoria->nombre,
-            'codigo' => $convocatoria->codigo,
+            'codigo' => $this->veIdentificadorConvocatoria($user) ? $convocatoria->codigo : null,
         ];
     }
 

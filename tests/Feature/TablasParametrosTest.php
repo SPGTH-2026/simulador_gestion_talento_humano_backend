@@ -151,10 +151,28 @@ class TablasParametrosTest extends TestCase
         $this->assertNull($suelto, 'No debe existir un índice suelto sobre ficha_id (lo cubre el UNIQUE).');
     }
 
-    public function test_convocatoria_skills_es_texto_libre_sin_parametro_id(): void
+    public function test_convocatoria_skills_conserva_nombre_y_agrega_parametro_id_nullable(): void
     {
+        // La skill sigue teniendo SIEMPRE su nombre (copia visible) y, si vino
+        // del catálogo, el parametro_id. La columna es nullable: las skills de
+        // texto libre siguen living sin parametro_id.
         $this->assertTrue(Schema::hasColumn('convocatoria_skills', 'nombre'));
-        $this->assertFalse(Schema::hasColumn('convocatoria_skills', 'parametro_id'));
+        $this->assertTrue(Schema::hasColumn('convocatoria_skills', 'parametro_id'));
+
+        $columnas = collect(Schema::getColumns('convocatoria_skills'))->keyBy('name');
+        $this->assertTrue($columnas['parametro_id']['nullable'], 'parametro_id debe ser nullable.');
+    }
+
+    public function test_convocatoria_skills_parametro_id_borra_en_null(): void
+    {
+        // Si la skill se retira del catálogo, la fila se CONSERVA con su
+        // nombre: la FK es ON DELETE SET NULL (nunca RESTRICT ni CASCADE).
+        $foraneas = collect(Schema::getForeignKeys('convocatoria_skills'))
+            ->first(fn (array $fk) => $fk['columns'] === ['parametro_id']);
+
+        $this->assertNotNull($foraneas, 'Falta la FK de convocatoria_skills.parametro_id.');
+        $this->assertSame('parametros', $foraneas['foreign_table']);
+        $this->assertSame('set null', strtolower((string) $foraneas['on_delete']));
     }
 
     public function test_postulacion_skills_tiene_parametro_id_nullable(): void

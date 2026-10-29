@@ -738,7 +738,14 @@ class PostulacionDocumentoTest extends TestCase
 
         $respuesta->assertJsonPath('data.convocatoria.id', $convocatoria->id);
         $respuesta->assertJsonPath('data.convocatoria.nombre', 'Analista de datos');
-        $respuesta->assertJsonPath('data.convocatoria.codigo', $convocatoria->codigo);
+        // El código es un dato de gestión: el dueño de la postulación no lo recibe.
+        $respuesta->assertJsonPath('data.convocatoria.codigo', null);
+
+        // El revisor (que sí gestiona) sí lo recibe.
+        $this->actingAs($instructor)
+            ->getJson("/api/revision/postulaciones/{$postulacion->id}/documentos")
+            ->assertOk()
+            ->assertJsonPath('data.convocatoria.codigo', $convocatoria->codigo);
 
         // Los ids son los de convocatoria_skills: los mismos que acepta
         // convocatoria_skill_id en POST /skills.

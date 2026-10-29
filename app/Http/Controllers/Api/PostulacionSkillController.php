@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Api\Concerns\GestionaPostulacionPropia;
 use App\Http\Controllers\Controller;
 use App\Models\ConvocatoriaSkill;
-use App\Models\Parametro;
 use App\Models\Postulacion;
 use App\Models\PostulacionSkill;
 use Illuminate\Http\JsonResponse;
@@ -18,101 +17,64 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Skills declaradas por el aspirante en su postulación.
  *
- * - Las que pide la convocatoria ("la tengo") se declaran enviando
- *   convocatoria_skill_id; las propias, enviando un nombre libre.
+ * - SOLO se puede declarar la skill que PIDE la convocatoria ("la tengo"),
+ *   enviando `convocatoria_skill_id`. Si la skill no es de esta convocatoria
+ *   -> 422.
  * - El certificado es OPCIONAL por skill (declarada vs. certificada) y se
  *   sube/reemplaza/borra con endpoints propios.
- * Skill declarada por el aspirante en una postulación. El origen puede ser:
- * de la convocatoria (`convocatoria_skill_id`), del catálogo general
- * (`parametro_id` del tema `skill_catalogo`) o propia (texto libre). El
- * certificado es opcional y se sube/reemplaza/borra con endpoints propios.
  * - Mismas reglas de acceso que los documentos: dueño (404 si es ajena),
- *   editable solo dentro de la ventana y en estado 'postulada', y lectura de
+ *   editable solo dentro de la ventana (borrador, postulada o retirada), y lectura de
  *   revisores con permiso 'documentos:ver' con alcance por ficha.
+ *
+ * Las filas ya declaradas antes de este cambio (origen 'catalogo' o 'propia')
+ * NO se borran ni se modifican: se siguen leyendo y el frontend las muestra
+ * al aspirante en solo lectura.
  */
 class PostulacionSkillController extends Controller
 {
     use GestionaPostulacionPropia;
 
-    private const MAX_NOMBRE = 100;
-
-    /** Tema de parámetros que representa el catálogo general de skills. */
-    private const TEMA_SKILL_CATALOGO = 'skill_catalogo';
-
     /**
-     * Declara una skill. Debe indicarse EXACTAMENTE UNA de estas formas:
-     *  - `convocatoria_skill_id` (skill pedida por la convocatoria),
-     *  - `parametro_id` del tema `skill_catalogo` (catálogo general),
-     *  - `nombre` (skill propia, texto libre).
-     * Más de una o ninguna -> 422. Idempotente por nombre.
+     * Declara una skill. SOLO se admite la skill que PIDE la convocatoria
+     * (se envía `convocatoria_skill_id`): ni skills del catálogo general ni
+     * nombres libres. Si la skill no es de esta convocatoria -> 422.
+     *
+     * Idempotente por nombre: si ya la tenía, se devuelve la existente.
      */
     public function store(Request $request, Postulacion $postulacion): JsonResponse
     {
         $this->exigirPropia($request, $postulacion);
         $this->exigirEditable($postulacion, 'skills');
 
+        // Las formas antiguas (skill del catálogo o nombre propio) ya no se
+        // admiten: se responden con un mensaje claro, no se ignoran.
+        if ($request->has('nombre') || $request->has('parametro_id')) {
+            throw ValidationException::withMessages([
+                'convocatoria_skill_id' => 'Solo puedes marcar las skills que pide la convocatoria.',
+            ]);
+        }
+
         $datos = $request->validate([
-            'nombre' => ['nullable', 'string', 'max:'.self::MAX_NOMBRE],
-            'convocatoria_skill_id' => ['nullable', 'integer'],
-            'parametro_id' => ['nullable', 'integer'],
+            'convocatoria_skill_id' => ['required', 'integer'],
         ], $this->mensajes(), $this->atributos());
 
-        $formas = array_filter([
-            'convocatoria_skill_id' => ! empty($datos['convocatoria_skill_id']),
-            'parametro_id' => ! empty($datos['parametro_id']),
-            'nombre' => isset($datos['nombre']) && trim((string) $datos['nombre']) !== '',
-        ]);
+        // La skill DEBE pertenecer a esta convocatoria: si es de otra, 422.
+        $convocatoriaSkill = ConvocatoriaSkill::query()
+            ->where('id', $datos['convocatoria_skill_id'])
+            ->where('convocatoria_id', $postulacion->convocatoria_id)
+            ->first();
 
-        if ($formas === []) {
+        if (! $convocatoriaSkill) {
             throw ValidationException::withMessages([
-                'nombre' => 'Debes indicar una skill de la convocatoria, del catálogo o un nombre propio.',
+                'convocatoria_skill_id' => 'Esa skill no hace parte de la convocatoria.',
             ]);
         }
 
-        if (count($formas) > 1) {
-            throw ValidationException::withMessages([
-                'nombre' => 'Indica la skill de una sola forma: de la convocatoria, del catálogo o un nombre propio.',
-            ]);
-        }
-
-        $convocatoriaSkillId = null;
-        $parametroId = null;
-
-        if (! empty($datos['convocatoria_skill_id'])) {
-            $convocatoriaSkill = ConvocatoriaSkill::query()
-                ->where('id', $datos['convocatoria_skill_id'])
-                ->where('convocatoria_id', $postulacion->convocatoria_id)
-                ->first();
-
-            if (! $convocatoriaSkill) {
-                throw ValidationException::withMessages([
-                    'convocatoria_skill_id' => 'Esa skill no hace parte de la convocatoria.',
-                ]);
-            }
-
-            $nombre = $convocatoriaSkill->nombre;
-            $convocatoriaSkillId = $convocatoriaSkill->id;
-        } elseif (! empty($datos['parametro_id'])) {
-            $parametro = Parametro::query()
-                ->where('id', $datos['parametro_id'])
-                ->whereHas('tema', fn ($q) => $q->where('codigo', self::TEMA_SKILL_CATALOGO))
-                ->first();
-
-            if (! $parametro) {
-                throw ValidationException::withMessages([
-                    'parametro_id' => 'Esa skill no hace parte del catálogo.',
-                ]);
-            }
-
-            $nombre = $parametro->nombre;
-            $parametroId = $parametro->id;
-        } else {
-            $nombre = trim((string) ($datos['nombre'] ?? ''));
-        }
+        $nombre = $convocatoriaSkill->nombre;
 
         if ($nombre === '') {
             throw ValidationException::withMessages([
-                'nombre' => 'El nombre de la skill es obligatorio.',
+                'convocatoria_skill_id' => 'El nombre de la skill es obligatorio.',
             ]);
         }
 
@@ -121,7 +83,7 @@ class PostulacionSkillController extends Controller
 
         if ($actuales >= $max) {
             throw ValidationException::withMessages([
-                'nombre' => "No puedes registrar más de {$max} skills en tu postulación.",
+                'convocatoria_skill_id' => "No puedes registrar más de {$max} skills en tu postulación.",
             ]);
         }
 
@@ -137,8 +99,8 @@ class PostulacionSkillController extends Controller
 
         $skill = PostulacionSkill::create([
             'postulacion_id' => $postulacion->id,
-            'convocatoria_skill_id' => $convocatoriaSkillId,
-            'parametro_id' => $parametroId,
+            'convocatoria_skill_id' => $convocatoriaSkill->id,
+            'parametro_id' => null,
             'nombre' => $nombre,
         ]);
 
@@ -333,6 +295,7 @@ class PostulacionSkillController extends Controller
             'string' => 'El campo :attribute debe ser texto.',
             'integer' => 'El campo :attribute no es válido.',
             'max' => 'El campo :attribute no debe superar :max caracteres.',
+            'convocatoria_skill_id.required' => 'Debes marcar una de las skills que pide la convocatoria.',
             'archivo.required' => 'El archivo es obligatorio.',
             'archivo.file' => 'El archivo no es válido.',
             'archivo.mimes' => 'El archivo debe ser un PDF.',
@@ -345,7 +308,7 @@ class PostulacionSkillController extends Controller
     {
         return [
             'nombre' => 'nombre de la skill',
-            'convocatoria_skill_id' => 'skill',
+            'convocatoria_skill_id' => 'skill de la convocatoria',
             'parametro_id' => 'skill del catálogo',
             'archivo' => 'archivo',
         ];

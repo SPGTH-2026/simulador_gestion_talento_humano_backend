@@ -19,10 +19,17 @@ use Tests\TestCase;
 /**
  * Paso 4: skills declaradas en la postulación.
  *
- * Cubre POST/DELETE de skills y el certificado OPCIONAL: declarar skills de la
- * convocatoria, del catálogo general o propias, dedupe sin distinguir
- * mayúsculas, tope de 30, y las mismas reglas de acceso que los documentos
- * (dueño, ventana, revisores).
+ * REGLA VIGENTE: el aspirante SOLO puede marcar las skills que PIDE la
+ * convocatoria (se envían con convocatoria_skill_id). Ni skills del catálogo
+ * general ni nombres libres: ambos se rechazan con 422. Si la skill no es de
+ * esta convocatoria -> 422.
+ *
+ * Cubre POST/DELETE de skills y el certificado OPCIONAL, el tope de 30, y las
+ * mismas reglas de acceso que los documentos (dueño, ventana, revisores).
+ *
+ * Las filas ya declaradas antes del cambio (origen 'catalogo' o 'propia') NO
+ * se borran: se conservan y se siguen leyendo. Eso cubren los tests que las
+ * crean directamente en la base de datos.
  */
 class PostulacionSkillTest extends TestCase
 {
@@ -113,6 +120,15 @@ class PostulacionSkillTest extends TestCase
         return UploadedFile::fake()->create($nombre, 100, 'application/pdf');
     }
 
+    /** Skill que PIDE la convocatoria: es la única que el aspirante puede marcar. */
+    private function skillDeConvocatoria(Convocatoria $convocatoria, string $nombre = 'Excel avanzado'): ConvocatoriaSkill
+    {
+        return ConvocatoriaSkill::create([
+            'convocatoria_id' => $convocatoria->id,
+            'nombre' => $nombre,
+        ]);
+    }
+
     /** @return array{0: User, 1: Postulacion, 2: Convocatoria} */
     private function base(): array
     {
@@ -127,28 +143,24 @@ class PostulacionSkillTest extends TestCase
 
     // ── Declarar skills ────────────────────────────────────────────────
 
-    public function test_declara_una_skill_propia_devuelve_201(): void
+    public function test_declara_una_skill_propia_devuelve_422(): void
     {
+        // Antes se podía declarar una skill libre; ahora solo las de la
+        // convocatoria: un nombre propio se rechaza.
         [$aspirante, $postulacion] = $this->base();
 
         $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['nombre' => '  Liderazgo  '])
-            ->assertCreated()
-            ->assertJsonPath('data.nombre', 'Liderazgo')
-            ->assertJsonPath('data.origen', 'propia')
-            ->assertJsonPath('data.certificado', null);
+            ->assertStatus(422)
+            ->assertJsonPath('errors.convocatoria_skill_id.0', 'Solo puedes marcar las skills que pide la convocatoria.');
 
-        $this->assertDatabaseHas('postulacion_skills', [
-            'postulacion_id' => $postulacion->id,
-            'nombre' => 'Liderazgo',
-            'convocatoria_skill_id' => null,
-        ]);
+        $this->assertDatabaseCount('postulacion_skills', 0);
     }
 
     public function test_declara_una_skill_de_la_convocatoria_devuelve_201(): void
     {
         [$aspirante, $postulacion, $convocatoria] = $this->base();
-        $skill = ConvocatoriaSkill::create(['convocatoria_id' => $convocatoria->id, 'nombre' => 'Excel avanzado']);
+        $skill = $this->skillDeConvocatoria($convocatoria, 'Excel avanzado');
 
         $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['convocatoria_skill_id' => $skill->id])
@@ -163,13 +175,14 @@ class PostulacionSkillTest extends TestCase
         ]);
     }
 
-    public function test_skill_repetida_sin_distinguir_mayusculas_es_idempotente(): void
+    public function test_skill_repetida_es_idempotente(): void
     {
-        [$aspirante, $postulacion] = $this->base();
+        [$aspirante, $postulacion, $convocatoria] = $this->base();
+        $skill = $this->skillDeConvocatoria($convocatoria, 'Excel');
         $url = "/api/postulaciones/{$postulacion->id}/skills";
 
-        $this->actingAs($aspirante)->postJson($url, ['nombre' => 'Excel'])->assertCreated();
-        $this->actingAs($aspirante)->postJson($url, ['nombre' => 'excel'])->assertOk();
+        $this->actingAs($aspirante)->postJson($url, ['convocatoria_skill_id' => $skill->id])->assertCreated();
+        $this->actingAs($aspirante)->postJson($url, ['convocatoria_skill_id' => $skill->id])->assertOk();
 
         $this->assertSame(1, PostulacionSkill::count());
     }
@@ -195,56 +208,55 @@ class PostulacionSkillTest extends TestCase
         $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/skills", [])
             ->assertStatus(422)
-            ->assertJsonPath('errors.nombre.0', 'Debes indicar una skill de la convocatoria, del catálogo o un nombre propio.');
+            ->assertJsonPath('errors.convocatoria_skill_id.0', 'Debes marcar una de las skills que pide la convocatoria.');
     }
 
-    public function test_nombre_mayor_a_100_caracteres_devuelve_422(): void
+    public function test_nombre_libre_se_rechaza_por_mas_de_100_caracteres(): void
     {
+        // El límite de 100 caracteres se aplica al nombre de la skill de la
+        // CONVOCATORIA (ver ConvocatoriaGestionTest); aquí se comprueba que un
+        // nombre libre (del POST) no se acepta ni siquiera siendo larguísimo.
         [$aspirante, $postulacion] = $this->base();
 
         $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['nombre' => str_repeat('a', 101)])
             ->assertStatus(422)
-            ->assertJsonPath('errors.nombre.0', 'El campo nombre de la skill no debe superar 100 caracteres.');
+            ->assertJsonPath('errors.convocatoria_skill_id.0', 'Solo puedes marcar las skills que pide la convocatoria.');
     }
 
     public function test_tope_de_30_skills_devuelve_422(): void
     {
-        [$aspirante, $postulacion] = $this->base();
+        [$aspirante, $postulacion, $convocatoria] = $this->base();
         $url = "/api/postulaciones/{$postulacion->id}/skills";
 
         for ($i = 1; $i <= 30; $i++) {
-            $this->actingAs($aspirante)->postJson($url, ['nombre' => "Skill {$i}"])->assertCreated();
+            $skill = $this->skillDeConvocatoria($convocatoria, "Skill {$i}");
+            $this->actingAs($aspirante)->postJson($url, ['convocatoria_skill_id' => $skill->id])->assertCreated();
         }
 
+        $extra = $this->skillDeConvocatoria($convocatoria, 'Skill 31');
+
         $this->actingAs($aspirante)
-            ->postJson($url, ['nombre' => 'Skill 31'])
+            ->postJson($url, ['convocatoria_skill_id' => $extra->id])
             ->assertStatus(422)
-            ->assertJsonPath('errors.nombre.0', 'No puedes registrar más de 30 skills en tu postulación.');
+            ->assertJsonPath('errors.convocatoria_skill_id.0', 'No puedes registrar más de 30 skills en tu postulación.');
 
         $this->assertSame(30, PostulacionSkill::count());
     }
 
-    // ── Declarar skills del catálogo general ───────────────────────────
+    // ── Las formas antiguas (catálogo y nombre propio) se rechazan ──────
 
-    public function test_declara_una_skill_del_catalogo_devuelve_201(): void
+    public function test_declara_una_skill_del_catalogo_devuelve_422(): void
     {
         [$aspirante, $postulacion] = $this->base();
         $parametroId = $this->parametroId('skill_catalogo', 'excel');
 
         $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['parametro_id' => $parametroId])
-            ->assertCreated()
-            ->assertJsonPath('data.nombre', 'Excel')
-            ->assertJsonPath('data.origen', 'catalogo')
-            ->assertJsonPath('data.certificado', null);
+            ->assertStatus(422)
+            ->assertJsonPath('errors.convocatoria_skill_id.0', 'Solo puedes marcar las skills que pide la convocatoria.');
 
-        $this->assertDatabaseHas('postulacion_skills', [
-            'postulacion_id' => $postulacion->id,
-            'parametro_id' => $parametroId,
-            'convocatoria_skill_id' => null,
-            'nombre' => 'Excel',
-        ]);
+        $this->assertDatabaseCount('postulacion_skills', 0);
     }
 
     public function test_parametro_de_otro_tema_devuelve_422(): void
@@ -255,7 +267,7 @@ class PostulacionSkillTest extends TestCase
         $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['parametro_id' => $ajeno])
             ->assertStatus(422)
-            ->assertJsonPath('errors.parametro_id.0', 'Esa skill no hace parte del catálogo.');
+            ->assertJsonPath('errors.convocatoria_skill_id.0', 'Solo puedes marcar las skills que pide la convocatoria.');
 
         $this->assertDatabaseCount('postulacion_skills', 0);
     }
@@ -267,59 +279,57 @@ class PostulacionSkillTest extends TestCase
         $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['parametro_id' => 999999])
             ->assertStatus(422)
-            ->assertJsonPath('errors.parametro_id.0', 'Esa skill no hace parte del catálogo.');
+            ->assertJsonPath('errors.convocatoria_skill_id.0', 'Solo puedes marcar las skills que pide la convocatoria.');
     }
 
     public function test_enviar_dos_formas_devuelve_422(): void
     {
         [$aspirante, $postulacion, $convocatoria] = $this->base();
-        $skill = ConvocatoriaSkill::create(['convocatoria_id' => $convocatoria->id, 'nombre' => 'Excel avanzado']);
+        $skill = $this->skillDeConvocatoria($convocatoria, 'Excel avanzado');
         $url = "/api/postulaciones/{$postulacion->id}/skills";
 
         // convocatoria_skill_id + nombre.
         $this->actingAs($aspirante)
             ->postJson($url, ['convocatoria_skill_id' => $skill->id, 'nombre' => 'Otra'])
             ->assertStatus(422)
-            ->assertJsonPath('errors.nombre.0', 'Indica la skill de una sola forma: de la convocatoria, del catálogo o un nombre propio.');
+            ->assertJsonPath('errors.convocatoria_skill_id.0', 'Solo puedes marcar las skills que pide la convocatoria.');
 
         // parametro_id + nombre.
         $this->actingAs($aspirante)
             ->postJson($url, ['parametro_id' => $this->parametroId('skill_catalogo', 'excel'), 'nombre' => 'Otra'])
             ->assertStatus(422)
-            ->assertJsonPath('errors.nombre.0', 'Indica la skill de una sola forma: de la convocatoria, del catálogo o un nombre propio.');
+            ->assertJsonPath('errors.convocatoria_skill_id.0', 'Solo puedes marcar las skills que pide la convocatoria.');
 
         // convocatoria_skill_id + parametro_id.
         $this->actingAs($aspirante)
             ->postJson($url, ['convocatoria_skill_id' => $skill->id, 'parametro_id' => $this->parametroId('skill_catalogo', 'excel')])
             ->assertStatus(422)
-            ->assertJsonPath('errors.nombre.0', 'Indica la skill de una sola forma: de la convocatoria, del catálogo o un nombre propio.');
+            ->assertJsonPath('errors.convocatoria_skill_id.0', 'Solo puedes marcar las skills que pide la convocatoria.');
 
         $this->assertDatabaseCount('postulacion_skills', 0);
     }
 
-    public function test_skill_del_catalogo_repetida_por_nombre_es_idempotente(): void
+    public function test_skill_del_catalogo_repetida_por_nombre_devuelve_422(): void
     {
         [$aspirante, $postulacion] = $this->base();
         $url = "/api/postulaciones/{$postulacion->id}/skills";
 
         $this->actingAs($aspirante)
             ->postJson($url, ['parametro_id' => $this->parametroId('skill_catalogo', 'excel')])
-            ->assertCreated()
-            ->assertJsonPath('data.origen', 'catalogo');
+            ->assertStatus(422);
 
-        // La misma skill, ahora como texto libre: idempotente, conserva el origen.
+        // La misma skill, ahora como texto libre: también se rechaza.
         $this->actingAs($aspirante)
             ->postJson($url, ['nombre' => 'excel'])
-            ->assertOk()
-            ->assertJsonPath('data.origen', 'catalogo');
+            ->assertStatus(422);
 
-        $this->assertSame(1, PostulacionSkill::count());
+        $this->assertSame(0, PostulacionSkill::count());
     }
 
-    public function test_skill_de_convocatoria_repetida_por_catalogo_es_idempotente(): void
+    public function test_skill_de_convocatoria_repetida_por_catalogo_devuelve_422(): void
     {
         [$aspirante, $postulacion, $convocatoria] = $this->base();
-        $skill = ConvocatoriaSkill::create(['convocatoria_id' => $convocatoria->id, 'nombre' => 'Excel']);
+        $skill = $this->skillDeConvocatoria($convocatoria, 'Excel');
         $url = "/api/postulaciones/{$postulacion->id}/skills";
 
         $this->actingAs($aspirante)
@@ -327,44 +337,55 @@ class PostulacionSkillTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('data.origen', 'convocatoria');
 
-        // El catálogo tiene "Excel" (mismo nombre): devuelve 200 el existente.
+        // El catálogo tiene "Excel" (mismo nombre): ya no se puede declarar.
         $this->actingAs($aspirante)
             ->postJson($url, ['parametro_id' => $this->parametroId('skill_catalogo', 'excel')])
-            ->assertOk()
-            ->assertJsonPath('data.origen', 'convocatoria');
+            ->assertStatus(422);
 
         $this->assertSame(1, PostulacionSkill::count());
     }
 
-    public function test_certificado_opcional_sobre_una_skill_del_catalogo(): void
-    {
-        [$aspirante, $postulacion] = $this->base();
-        $this->actingAs($aspirante)
-            ->postJson("/api/postulaciones/{$postulacion->id}/skills", [
-                'parametro_id' => $this->parametroId('skill_catalogo', 'ingles'),
-            ])
-            ->assertCreated();
-
-        $skill = PostulacionSkill::sole();
-
-        $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
-            ->post("/api/postulaciones/{$postulacion->id}/skills/{$skill->id}/certificado", [
-                'archivo' => $this->pdf('ingles.pdf'),
-            ])
-            ->assertOk()
-            ->assertJsonPath('data.origen', 'catalogo')
-            ->assertJsonPath('data.certificado.nombre_original', 'ingles.pdf');
-    }
-
-    public function test_revision_muestra_origen_catalogo(): void
+    public function test_certificado_opcional_sobre_una_skill_de_la_convocatoria(): void
     {
         [$aspirante, $postulacion, $convocatoria] = $this->base();
-        $convocatoriaSkill = ConvocatoriaSkill::create(['convocatoria_id' => $convocatoria->id, 'nombre' => 'Power BI']);
+        $skill = $this->skillDeConvocatoria($convocatoria, 'Word');
+
+        $this->actingAs($aspirante)
+            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['convocatoria_skill_id' => $skill->id])
+            ->assertCreated();
+
+        $declarada = PostulacionSkill::sole();
+
+        $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
+            ->post("/api/postulaciones/{$postulacion->id}/skills/{$declarada->id}/certificado", [
+                'archivo' => $this->pdf('word.pdf'),
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.origen', 'convocatoria')
+            ->assertJsonPath('data.certificado.nombre_original', 'word.pdf');
+    }
+
+    public function test_revision_muestra_el_origen_de_cada_skill(): void
+    {
+        [$aspirante, $postulacion, $convocatoria] = $this->base();
+        $convocatoriaSkill = $this->skillDeConvocatoria($convocatoria, 'Power BI');
         $url = "/api/postulaciones/{$postulacion->id}/skills";
 
-        $this->actingAs($aspirante)->postJson($url, ['convocatoria_skill_id' => $convocatoriaSkill->id])->assertCreated();
-        $this->actingAs($aspirante)->postJson($url, ['parametro_id' => $this->parametroId('skill_catalogo', 'excel')])->assertCreated();
-        $this->actingAs($aspirante)->postJson($url, ['nombre' => 'Pintura'])->assertCreated();
+        $this->actingAs($aspirante)
+            ->postJson($url, ['convocatoria_skill_id' => $convocatoriaSkill->id])
+            ->assertCreated();
+
+        // Las filas VIEJAS (las de antes del cambio) NO se borran: se conservan
+        // con su origen y el revisor las sigue viendo.
+        PostulacionSkill::create([
+            'postulacion_id' => $postulacion->id,
+            'parametro_id' => $this->parametroId('skill_catalogo', 'excel'),
+            'nombre' => 'Excel',
+        ]);
+        PostulacionSkill::create([
+            'postulacion_id' => $postulacion->id,
+            'nombre' => 'Pintura',
+        ]);
 
         $instructor = $this->instructor($aspirante->ficha);
 
@@ -394,9 +415,11 @@ class PostulacionSkillTest extends TestCase
 
     public function test_sube_y_quita_el_certificado_de_una_skill(): void
     {
-        [$aspirante, $postulacion] = $this->base();
+        [$aspirante, $postulacion, $convocatoria] = $this->base();
+        $convocatoriaSkill = $this->skillDeConvocatoria($convocatoria, 'Excel');
+
         $this->actingAs($aspirante)
-            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['nombre' => 'Excel'])
+            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['convocatoria_skill_id' => $convocatoriaSkill->id])
             ->assertCreated();
 
         $skill = PostulacionSkill::sole();
@@ -418,9 +441,11 @@ class PostulacionSkillTest extends TestCase
 
     public function test_borrar_una_skill_borra_su_certificado(): void
     {
-        [$aspirante, $postulacion] = $this->base();
+        [$aspirante, $postulacion, $convocatoria] = $this->base();
+        $convocatoriaSkill = $this->skillDeConvocatoria($convocatoria, 'Excel');
+
         $this->actingAs($aspirante)
-            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['nombre' => 'Excel'])
+            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['convocatoria_skill_id' => $convocatoriaSkill->id])
             ->assertCreated();
         $skill = PostulacionSkill::sole();
 
@@ -441,9 +466,11 @@ class PostulacionSkillTest extends TestCase
 
     public function test_certificado_no_pdf_devuelve_422(): void
     {
-        [$aspirante, $postulacion] = $this->base();
+        [$aspirante, $postulacion, $convocatoria] = $this->base();
+        $convocatoriaSkill = $this->skillDeConvocatoria($convocatoria, 'Excel');
+
         $this->actingAs($aspirante)
-            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['nombre' => 'Excel'])
+            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['convocatoria_skill_id' => $convocatoriaSkill->id])
             ->assertCreated();
         $skill = PostulacionSkill::sole();
 
@@ -459,16 +486,17 @@ class PostulacionSkillTest extends TestCase
 
     public function test_no_se_puede_declarar_skills_en_una_postulacion_ajena(): void
     {
-        [$aspirante, $postulacion] = $this->base();
+        [$aspirante, $postulacion, $convocatoria] = $this->base();
+        $skill = $this->skillDeConvocatoria($convocatoria);
         $otro = $this->aspirante($postulacion->convocatoria->ficha);
 
         $this->actingAs($otro)
-            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['nombre' => 'Excel'])
+            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['convocatoria_skill_id' => $skill->id])
             ->assertNotFound()
             ->assertJsonPath('message', 'Postulación no encontrada.');
     }
 
-    public function test_no_se_puede_declarar_skills_en_postulacion_retirada(): void
+    public function test_se_puede_declarar_skills_en_postulacion_retirada_dentro_de_la_ventana(): void
     {
         $ficha = $this->ficha();
         $instructor = $this->instructor($ficha);
@@ -478,18 +506,25 @@ class PostulacionSkillTest extends TestCase
             'estado_id' => $this->parametroId('estado_postulacion', 'retirada'),
             'fecha_retiro' => now(),
         ]);
+        $skill = $this->skillDeConvocatoria($convocatoria);
 
         $this->actingAs($aspirante)
-            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['nombre' => 'Excel'])
-            ->assertStatus(422)
-            ->assertJsonPath('errors.skills.0', 'Tu postulación está retirada. Reactívala para editar documentos.');
+            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['convocatoria_skill_id' => $skill->id])
+            ->assertCreated();
+
+        $this->assertSame(
+            $this->parametroId('estado_postulacion', 'retirada'),
+            $postulacion->fresh()->estado_id,
+        );
     }
 
     public function test_revisor_puede_descargar_el_certificado(): void
     {
-        [$aspirante, $postulacion] = $this->base();
+        [$aspirante, $postulacion, $convocatoria] = $this->base();
+        $convocatoriaSkill = $this->skillDeConvocatoria($convocatoria, 'Excel');
+
         $this->actingAs($aspirante)
-            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['nombre' => 'Excel'])
+            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['convocatoria_skill_id' => $convocatoriaSkill->id])
             ->assertCreated();
         $skill = PostulacionSkill::sole();
 
@@ -517,9 +552,10 @@ class PostulacionSkillTest extends TestCase
 
     public function test_el_certificado_lo_pide_en_linea_el_dueno_y_sigue_descargandose_sin_inline(): void
     {
-        [$aspirante, $postulacion] = $this->base();
+        [$aspirante, $postulacion, $convocatoria] = $this->base();
+        $convocatoriaSkill = $this->skillDeConvocatoria($convocatoria, 'Excel');
         $this->actingAs($aspirante)
-            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['nombre' => 'Excel'])
+            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['convocatoria_skill_id' => $convocatoriaSkill->id])
             ->assertCreated();
         $skill = PostulacionSkill::sole();
 
@@ -541,9 +577,10 @@ class PostulacionSkillTest extends TestCase
 
     public function test_el_revisor_tambien_puede_abrir_el_certificado_en_linea(): void
     {
-        [$aspirante, $postulacion] = $this->base();
+        [$aspirante, $postulacion, $convocatoria] = $this->base();
+        $convocatoriaSkill = $this->skillDeConvocatoria($convocatoria, 'Excel');
         $this->actingAs($aspirante)
-            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['nombre' => 'Excel'])
+            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['convocatoria_skill_id' => $convocatoriaSkill->id])
             ->assertCreated();
         $skill = PostulacionSkill::sole();
 
@@ -563,9 +600,11 @@ class PostulacionSkillTest extends TestCase
 
     public function test_descargar_un_certificado_ausente_devuelve_404(): void
     {
-        [$aspirante, $postulacion] = $this->base();
+        [$aspirante, $postulacion, $convocatoria] = $this->base();
+        $convocatoriaSkill = $this->skillDeConvocatoria($convocatoria, 'Excel');
+
         $this->actingAs($aspirante)
-            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['nombre' => 'Excel'])
+            ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['convocatoria_skill_id' => $convocatoriaSkill->id])
             ->assertCreated();
         $skill = PostulacionSkill::sole();
 
@@ -585,10 +624,7 @@ class PostulacionSkillTest extends TestCase
     public function test_borrar_la_skill_de_la_convocatoria_conserva_la_declarada(): void
     {
         [$aspirante, $postulacion, $convocatoria] = $this->base();
-        $convocatoriaSkill = ConvocatoriaSkill::create([
-            'convocatoria_id' => $convocatoria->id,
-            'nombre' => 'Excel avanzado',
-        ]);
+        $convocatoriaSkill = $this->skillDeConvocatoria($convocatoria, 'Excel avanzado');
 
         $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/skills", [
@@ -599,7 +635,7 @@ class PostulacionSkillTest extends TestCase
         $skill = PostulacionSkill::sole();
 
         // La convocatoria borra su skill: la fila de la postulación se CONSERVA
-        // como propia (SET NULL) y mantiene el nombre ya copiado.
+        // (SET NULL) y mantiene el nombre ya copiado.
         $convocatoriaSkill->delete();
 
         $this->assertDatabaseHas('postulacion_skills', [
@@ -607,5 +643,46 @@ class PostulacionSkillTest extends TestCase
             'convocatoria_skill_id' => null,
             'nombre' => 'Excel avanzado',
         ]);
+    }
+
+    public function test_una_fila_heredada_sigue_legible_y_su_certificado_lo_abren_dueno_y_revisor(): void
+    {
+        [$aspirante, $postulacion] = $this->base();
+
+        $delCatalogo = PostulacionSkill::create([
+            'postulacion_id' => $postulacion->id,
+            'convocatoria_skill_id' => null,
+            'parametro_id' => $this->parametroId('skill_catalogo', 'excel'),
+            'nombre' => 'Excel',
+        ]);
+        $propia = PostulacionSkill::create([
+            'postulacion_id' => $postulacion->id,
+            'convocatoria_skill_id' => null,
+            'parametro_id' => null,
+            'nombre' => 'Liderazgo previo',
+        ]);
+
+        $this->actingAs($aspirante)
+            ->getJson("/api/postulaciones/{$postulacion->id}/documentos")
+            ->assertOk()
+            ->assertJsonFragment(['nombre' => 'Excel'])
+            ->assertJsonFragment(['nombre' => 'Liderazgo previo']);
+
+        $instructor = $this->instructor($aspirante->ficha);
+
+        foreach ([$delCatalogo, $propia] as $skill) {
+            $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
+                ->post("/api/postulaciones/{$postulacion->id}/skills/{$skill->id}/certificado", [
+                    'archivo' => $this->pdf('heredada.pdf'),
+                ])->assertOk();
+
+            $this->actingAs($aspirante)
+                ->get("/api/postulaciones/{$postulacion->id}/skills/{$skill->id}/certificado/archivo?inline=1")
+                ->assertOk();
+
+            $this->actingAs($instructor)
+                ->get("/api/revision/postulaciones/{$postulacion->id}/skills/{$skill->id}/certificado/archivo?inline=1")
+                ->assertOk();
+        }
     }
 }

@@ -350,16 +350,34 @@ class ConvocatoriaGestionTest extends TestCase
         ])->assertStatus(422)->assertJsonStructure(['errors' => ['fecha_cierre']]);
     }
 
-    public function test_skills_se_recortan_y_deduplican(): void
+    public function test_skills_se_recortan_y_se_descartan_las_vacias(): void
     {
         $instructor = $this->instructor($this->ficha());
 
+        // Se recortan los espacios sobrantes y las vacías se descartan.
         $respuesta = $this->actingAs($instructor)->postJson('/api/convocatorias', [
             'nombre' => 'X',
-            'skills' => ['  Excel  ', 'excel', '', 'Power BI'],
+            'skills' => ['  Excel  ', '', 'Power  BI'],
         ])->assertCreated();
 
         $this->assertSame(['Excel', 'Power BI'], $respuesta->json('data.skills'));
+    }
+
+    public function test_skills_repetidas_por_mayusculas_devuelve_422(): void
+    {
+        $instructor = $this->instructor($this->ficha());
+
+        // Una skill repetida (sin distinguir mayúsculas ni espacios sobrantes)
+        // es un error: no se guarda en silencio.
+        $this->actingAs($instructor)
+            ->postJson('/api/convocatorias', [
+                'nombre' => 'X',
+                'skills' => ['  Excel  ', 'excel', 'Power BI'],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.skills.0', 'No puedes repetir la misma skill.');
+
+        $this->assertSame(0, Convocatoria::count());
     }
 
     public function test_rechaza_mas_de_20_skills(): void
@@ -449,7 +467,8 @@ class ConvocatoriaGestionTest extends TestCase
         $respuesta = $this->actingAs($aspirante)->getJson('/api/convocatorias')->assertOk();
 
         $this->assertCount(1, $respuesta->json('data'));
-        $this->assertSame('PUB-1', $respuesta->json('data.0.codigo'));
+        // El código (CONV-AAAA-NNN) es un dato de gestión: el aspiring candidate no lo recibe.
+        $this->assertNull($respuesta->json('data.0.codigo'));
     }
 
     public function test_listado_filtra_por_estado(): void
@@ -596,7 +615,15 @@ class ConvocatoriaGestionTest extends TestCase
             'estado_id' => $this->parametroId('estado_convocatoria', 'publicada'),
         ]);
 
+        // El Aspirante ve el detalle, pero NO el código: es un dato de gestión.
         $this->actingAs($aspirante)
+            ->getJson('/api/convocatorias/'.$publicada->id)
+            ->assertOk()
+            ->assertJsonPath('data.codigo', null)
+            ->assertJsonPath('data.id', $publicada->id);
+
+        // Quien sí puede gestionar lo recibe.
+        $this->actingAs($instructor)
             ->getJson('/api/convocatorias/'.$publicada->id)
             ->assertOk()
             ->assertJsonPath('data.codigo', 'PUB-1');
@@ -945,7 +972,35 @@ class ConvocatoriaGestionTest extends TestCase
             ->getJson('/api/convocatorias?q=BusquedaX')
             ->assertOk();
 
-        $this->assertSame(['BX-2'], array_column($respuesta->json('data'), 'codigo'));
+        // Solo ve la publicada (y sin código: es un dato de gestión).
+        $this->assertCount(1, $respuesta->json('data'));
+        $this->assertNull($respuesta->json('data.0.codigo'));
+        $this->assertSame('BusquedaX', $respuesta->json('data.0.nombre'));
+    }
+
+    public function test_buscador_por_codigo_solo_lo_usa_quien_gestiona(): void
+    {
+        $ficha = $this->ficha();
+        $instructor = $this->instructor($ficha);
+        $aspirante = $this->aspirante($ficha);
+        $this->crearConvocatoria($ficha, $instructor, [
+            'codigo' => 'BUS-9',
+            'nombre' => 'Nombre normal',
+            'estado_id' => $this->parametroId('estado_convocatoria', 'publicada'),
+        ]);
+
+        // Quien gestiona: el código es un criterio de búsqueda válido.
+        $delGestor = $this->actingAs($instructor)
+            ->getJson('/api/convocatorias?q=BUS-9')
+            ->assertOk();
+        $this->assertCount(1, $delGestor->json('data'));
+        $this->assertSame('BUS-9', $delGestor->json('data.0.codigo'));
+
+        // El Aspirante no busca por código (ni lo recibe): 0 resultados.
+        $delAspirante = $this->actingAs($aspirante)
+            ->getJson('/api/convocatorias?q=BUS-9')
+            ->assertOk();
+        $this->assertSame([], $delAspirante->json('data'));
     }
 
     public function test_buscador_no_cruza_fichas(): void

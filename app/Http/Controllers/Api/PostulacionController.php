@@ -6,10 +6,12 @@ use App\Enums\ConvocatoriaEstado;
 use App\Enums\PostulacionEstado;
 use App\Enums\Role;
 use App\Enums\VentanaPostulacion;
+use App\Http\Controllers\Api\Concerns\IdentificadorConvocatoria;
 use App\Http\Controllers\Controller;
 use App\Models\Convocatoria;
 use App\Models\Parametro;
 use App\Models\Postulacion;
+use App\Models\User;
 use App\Services\DocumentosDePostulacion;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
@@ -40,6 +42,8 @@ use Illuminate\Validation\ValidationException;
  */
 class PostulacionController extends Controller
 {
+    use IdentificadorConvocatoria;
+
     /**
      * "Mis postulaciones": listado paginado de las postulaciones del autenticado.
      * SIEMPRE se filtra por su user_id, sea cual sea el rol: un instructor o un
@@ -63,7 +67,7 @@ class PostulacionController extends Controller
 
         return response()->json([
             'data' => $listado->getCollection()
-                ->map(fn (Postulacion $p) => $this->presentar($p))
+                ->map(fn (Postulacion $p) => $this->presentar($p, $request->user()))
                 ->values(),
             'meta' => [
                 'current_page' => $listado->currentPage(),
@@ -132,7 +136,7 @@ class PostulacionController extends Controller
             }
 
             return response()->json([
-                'data' => $this->presentar($previa->fresh(['estado', 'convocatoria.estado'])),
+                'data' => $this->presentar($previa->fresh(['estado', 'convocatoria.estado']), $request->user()),
             ]);
         }
 
@@ -156,24 +160,29 @@ class PostulacionController extends Controller
         }
 
         return response()->json([
-            'data' => $this->presentar($nueva->load(['estado', 'convocatoria.estado'])),
+            'data' => $this->presentar($nueva->load(['estado', 'convocatoria.estado']), $request->user()),
         ], 201);
     }
 
     /**
-     * Descarte, retiro y reapertura de una postulación propia.
+     * Descarte, retiro, reapertura y reactivación de una postulación propia.
      *
      * El estado se identifica SIEMPRE por código (borrador / postulada /
      * retirada); un id numérico devuelve 422. Una postulación ajena (o
-     * inexistente) responde 404 ANTES de leer el cuerpo. 'postulada' ya NO se
-     * cambia aquí: el envío valida los documentos. Descartar un borrador o
-     * retirar una postulada solo exige que la convocatoria siga publicada;
-     * reabrir (retirada -> borrador) usa la misma ventana que el POST. El cambio
-     * se hace con un UPDATE condicionado por el estado leído: si otra petición
-     * se adelantó, afecta 0 filas y se responde 422 (nunca 500).
+     * inexistente) responde 404 ANTES de leer el cuerpo. Descartar un borrador
+     * o retirar una postulada solo exige que la convocatoria siga publicada.
+     * Reabrir (retirada -> borrador) y reactivar (retirada -> postulada) usan
+     * la misma ventana que el POST; reactivar exige además los documentos
+     * obligatorios completos y responde 422 con `faltantes`. Un borrador NO
+     * salta a postulada por aquí: eso lo hace enviar(). El cambio se hace con
+     * un UPDATE condicionado por el estado leído: si otra petición se adelantó,
+     * afecta 0 filas y se responde 422 (nunca 500).
      */
-    public function estado(Request $request, Postulacion $postulacion): JsonResponse
-    {
+    public function estado(
+        Request $request,
+        Postulacion $postulacion,
+        DocumentosDePostulacion $documentos,
+    ): JsonResponse {
         // 1) Frontera de aislamiento ANTES de validar el cuerpo: una postulacion
         //    ajena responde 404 aunque el cuerpo venga invalido (no la revela).
         if ($postulacion->user_id !== $request->user()->id) {
@@ -198,9 +207,13 @@ class PostulacionController extends Controller
             throw ValidationException::withMessages(['estado' => 'El estado no es válido.']);
         }
 
-        // 'postulada' solo se alcanza por el envío (que valida documentos);
-        // aquí se rechaza con un mensaje que guía al endpoint correcto.
-        if ($destino === PostulacionEstado::Postulada->value) {
+        // 'postulada' desde un borrador solo se alcanza por el envío (que valida
+        // documentos); aquí se rechaza guiando al endpoint correcto. Desde
+        // 'retirada' SÍ se admite: es "volver a postularme" (reactivación).
+        $reactivar = $actual === PostulacionEstado::Retirada->value
+            && $destino === PostulacionEstado::Postulada->value;
+
+        if ($destino === PostulacionEstado::Postulada->value && ! $reactivar) {
             throw ValidationException::withMessages([
                 'estado' => 'Para enviar tu postulación usa el endpoint de envío.',
             ]);
@@ -230,24 +243,47 @@ class PostulacionController extends Controller
                     'estado' => 'No puedes retirar tu postulación: la convocatoria ya no está publicada.',
                 ]);
             }
+        } elseif ($reactivar) {
+            // Volver a postularme: misma ventana que el envío y obligatorios
+            // completos. Si faltan, la postulación SIGUE retirada (no se toca).
+            $this->exigirVentanaAbierta($postulacion->convocatoria, 'estado');
+
+            $faltantes = $documentos->faltantes($postulacion);
+
+            if ($faltantes !== []) {
+                return response()->json([
+                    'message' => 'No se pudo reactivar la postulación: faltan documentos obligatorios.',
+                    'errors' => [
+                        'documentos' => [$documentos->mensaje($faltantes)],
+                    ],
+                    'faltantes' => $faltantes,
+                ], 422);
+            }
         } else {
             // Reapertura (retirada -> borrador): misma ventana que el POST.
             $this->exigirVentanaAbierta($postulacion->convocatoria, 'estado');
         }
 
         // 3) UPDATE condicionado por el estado leido (protege contra carreras).
+        $nuevoEstado = match (true) {
+            $reactivar => PostulacionEstado::Postulada->value,
+            $retirar => PostulacionEstado::Retirada->value,
+            default => PostulacionEstado::Borrador->value,
+        };
+
+        $cambios = [
+            'estado_id' => $this->parametroId('estado_postulacion', $nuevoEstado),
+            'fecha_retiro' => $retirar ? now() : null,
+        ];
+
+        if ($reactivar) {
+            $cambios['fecha_postulacion'] = now();
+        }
+
         $afectadas = Postulacion::query()
             ->whereKey($postulacion->id)
             ->where('estado_id', $this->parametroId('estado_postulacion', $actual))
-            ->update($destino === PostulacionEstado::Retirada->value
-                ? [
-                    'estado_id' => $this->parametroId('estado_postulacion', PostulacionEstado::Retirada->value),
-                    'fecha_retiro' => now(),
-                ]
-                : [
-                    'estado_id' => $this->parametroId('estado_postulacion', PostulacionEstado::Borrador->value),
-                    'fecha_retiro' => null,
-                ]);
+            ->update($cambios);
 
         if ($afectadas === 0) {
             throw ValidationException::withMessages([
@@ -256,7 +292,7 @@ class PostulacionController extends Controller
         }
 
         return response()->json([
-            'data' => $this->presentar($postulacion->fresh(['estado', 'convocatoria.estado'])),
+            'data' => $this->presentar($postulacion->fresh(['estado', 'convocatoria.estado']), $request->user()),
         ]);
     }
 
@@ -321,7 +357,7 @@ class PostulacionController extends Controller
         }
 
         return response()->json([
-            'data' => $this->presentar($postulacion->fresh(['estado', 'convocatoria.estado'])),
+            'data' => $this->presentar($postulacion->fresh(['estado', 'convocatoria.estado']), $request->user()),
         ]);
     }
 
@@ -381,23 +417,29 @@ class PostulacionController extends Controller
 
     // ── Presentación ───────────────────────────────────────────────────
 
-    private function presentar(Postulacion $postulacion): array
+    private function presentar(Postulacion $postulacion, User $user): array
     {
         return [
             'id' => $postulacion->id,
             'estado' => $this->parametro($postulacion->estado),
             'fecha_postulacion' => $postulacion->fecha_postulacion?->toIso8601String(),
             'fecha_retiro' => $postulacion->fecha_retiro?->toIso8601String(),
-            'convocatoria' => $this->resumenConvocatoria($postulacion->convocatoria),
+            'convocatoria' => $this->resumenConvocatoria($postulacion->convocatoria, $user),
         ];
     }
 
-    /** Resumen embebido: permite mostrar la tarjeta sin pedir el detalle. */
-    private function resumenConvocatoria(Convocatoria $convocatoria): array
+    /**
+     * Resumen embebido: permite mostrar la tarjeta sin pedir el detalle.
+     *
+     * El `codigo` (CONV-AAAA-NNN) es un dato de gestión: solo lo recibe quien
+     * está en la lista blanca (instructor, super admin y el subrol
+     * gestor_convocatorias). Para el resto llega en null.
+     */
+    private function resumenConvocatoria(Convocatoria $convocatoria, User $user): array
     {
         return [
             'id' => $convocatoria->id,
-            'codigo' => $convocatoria->codigo,
+            'codigo' => $this->veIdentificadorConvocatoria($user) ? $convocatoria->codigo : null,
             'nombre' => $convocatoria->nombre,
             'cargo' => $convocatoria->cargo,
             'area' => $convocatoria->area,

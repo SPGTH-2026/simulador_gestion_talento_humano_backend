@@ -46,7 +46,7 @@ class ParametroControllerTest extends TestCase
         $this->assertCount(10, $grupos);
 
         $total = array_sum(array_map(fn (array $g) => count($g['parametros']), $grupos));
-        $this->assertSame(52, $total);
+        $this->assertSame(43, $total);
 
         foreach ($grupos as $grupo) {
             $this->assertSame(['tema', 'nombre', 'parametros'], array_keys($grupo));
@@ -166,7 +166,7 @@ class ParametroControllerTest extends TestCase
             ->assertOk()
             ->json('data');
 
-        $this->assertCount(19, $data);
+        $this->assertCount(10, $data);
         $this->assertSame(
             ['id', 'codigo', 'nombre', 'es_sistema', 'es_defecto'],
             array_keys($data[0])
@@ -174,6 +174,8 @@ class ParametroControllerTest extends TestCase
         $this->assertContains('comunicacion_asertiva', array_column($data, 'codigo'));
         $this->assertContains('excel', array_column($data, 'codigo'));
         $this->assertContains('redaccion_informes', array_column($data, 'codigo'));
+        $this->assertNotContains('powerpoint', array_column($data, 'codigo'));
+        $this->assertNotContains('ingles', array_column($data, 'codigo'));
     }
 
     public function test_usuario_sin_ficha_puede_consultar(): void

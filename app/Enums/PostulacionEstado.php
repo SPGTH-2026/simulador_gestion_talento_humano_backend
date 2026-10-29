@@ -24,11 +24,13 @@ enum PostulacionEstado: string
      *
      *  - borrador  -> retirada (descartar) y postulada (solo vía enviar()).
      *  - postulada -> retirada (retirar).
-     *  - retirada  -> borrador  (reabrir; ya NO salta directo a postulada).
+     *  - retirada  -> borrador  (reabrir) y postulada (volver a postularme;
+     *    esta última solo con la ventana abierta y los obligatorios completos).
      *
      * Descartar/retirar solo exige que la convocatoria siga publicada; reabrir
-     * usa la misma ventana que el envío. Esa validación vive en el controlador,
-     * igual que la exigencia de documentos obligatorios antes de enviar.
+     * y reactivar usan la misma ventana que el envío. Esa validación vive en el
+     * controlador, igual que la exigencia de documentos obligatorios antes de
+     * enviar o reactivar.
      *
      * @return array<string, string[]>
      */
@@ -37,7 +39,7 @@ enum PostulacionEstado: string
         return [
             self::Borrador->value => [self::Postulada->value, self::Retirada->value],
             self::Postulada->value => [self::Retirada->value],
-            self::Retirada->value => [self::Borrador->value],
+            self::Retirada->value => [self::Borrador->value, self::Postulada->value],
         ];
     }
 }
