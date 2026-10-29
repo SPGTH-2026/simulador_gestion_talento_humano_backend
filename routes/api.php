@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ConvocatoriaController;
+use App\Http\Controllers\Api\EvaluacionController;
 use App\Http\Controllers\Api\FichaController;
 use App\Http\Controllers\Api\ParametroController;
 use App\Http\Controllers\Api\PerfilAspiranteController;
@@ -203,6 +204,13 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
         ->middleware('can:documentos:ver')
         ->whereNumber('user')
         ->missing(fn () => abort(404, 'Portafolio no encontrado.'));
+
+    // ── Módulo de Evaluación ──────────────────────────────────────────
+    Route::get('evaluaciones', [EvaluacionController::class, 'index'])->middleware('can:evaluacion:ver');
+    Route::get('evaluaciones/{postulacion}', [EvaluacionController::class, 'show'])->middleware('can:evaluacion:ver');
+    Route::put('evaluaciones/{postulacion}', [EvaluacionController::class, 'upsert'])->middleware('can:evaluacion:evaluar');
+
+    Route::get('mis-evaluaciones', [EvaluacionController::class, 'misEvaluaciones'])->middleware('can:propio:evaluaciones');
 });
 
 // ── Ejemplo: cada ruta de negocio declara el permiso que exige (403 si el rol no lo tiene) ──
