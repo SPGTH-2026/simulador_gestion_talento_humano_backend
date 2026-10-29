@@ -33,12 +33,16 @@ class PortafolioController extends Controller
             abort(404, 'Portafolio no encontrado.');
         }
 
-        $postulaciones = Postulacion::query()
-            ->with(['estado', 'convocatoria.estado', 'documentos', 'skills'])
-            ->where('user_id', $user->id)
-            ->orderByDesc('fecha_postulacion')
-            ->orderByDesc('id')
-            ->get();
+        // Un usuario inhabilitado (active = false) no muestra sus postulaciones en
+        // el portafolio. Las filas no se borran: al reactivarlo vuelven a aparecer.
+        $postulaciones = $user->active
+            ? Postulacion::query()
+                ->with(['estado', 'convocatoria.estado', 'documentos', 'skills'])
+                ->where('user_id', $user->id)
+                ->orderByDesc('fecha_postulacion')
+                ->orderByDesc('id')
+                ->get()
+            : collect();
 
         return response()->json([
             'data' => [
