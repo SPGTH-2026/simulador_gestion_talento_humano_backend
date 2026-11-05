@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Parametro;
 use App\Models\PerfilAspirante;
 use App\Models\Postulacion;
+use Illuminate\Support\Collection;
 
 /**
  * Regla única de "documentos obligatorios de una postulación". La comparten la
@@ -37,6 +38,44 @@ class DocumentosDePostulacion
             ->with('sexo')
             ->first();
 
+        return $this->faltantesCon($postulacion, $perfil);
+    }
+
+    /**
+     * Calcula `completo` para VARIAS postulaciones con dos consultas en total
+     * (relaciones y perfiles), en vez de dos consultas por postulación.
+     *
+     * @return array<int, bool> mapa id de postulación => completo
+     */
+    public function completosPara(Collection $postulaciones): array
+    {
+        if ($postulaciones->isEmpty()) {
+            return [];
+        }
+
+        $postulaciones->loadMissing(['convocatoria.documentos', 'documentos']);
+
+        $perfiles = PerfilAspirante::query()
+            ->whereIn('user_id', $postulaciones->pluck('user_id')->unique()->all())
+            ->with('sexo')
+            ->get()
+            ->keyBy('user_id');
+
+        $resultado = [];
+        foreach ($postulaciones as $postulacion) {
+            $resultado[$postulacion->id] = $this->faltantesCon($postulacion, $perfiles->get($postulacion->user_id)) === [];
+        }
+
+        return $resultado;
+    }
+
+    /**
+     * Faltantes con el perfil ya resuelto (null = el aspirante no registró sexo).
+     *
+     * @return array<int, array{codigo: string, nombre: string, motivo?: string}>
+     */
+    private function faltantesCon(Postulacion $postulacion, ?PerfilAspirante $perfil): array
+    {
         $sexoMujer = $perfil?->sexo?->codigo === 'mujer';
 
         $subidos = $postulacion->documentos

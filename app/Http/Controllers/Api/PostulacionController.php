@@ -65,9 +65,15 @@ class PostulacionController extends Controller
             ->orderByDesc('id')
             ->paginate($datos['per_page'] ?? 20, ['*'], 'page', $datos['page'] ?? 1);
 
+        // `completo` para toda la página en lote (2 consultas), así el inicio del
+        // aspirante no necesita una petición de documentos por cada borrador.
+        $completos = app(DocumentosDePostulacion::class)->completosPara($listado->getCollection());
+
         return response()->json([
             'data' => $listado->getCollection()
-                ->map(fn (Postulacion $p) => $this->presentar($p, $request->user()))
+                ->map(fn (Postulacion $p) => $this->presentar($p, $request->user()) + [
+                    'completo' => $completos[$p->id] ?? false,
+                ])
                 ->values(),
             'meta' => [
                 'current_page' => $listado->currentPage(),
