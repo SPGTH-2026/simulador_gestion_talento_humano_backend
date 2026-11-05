@@ -2,20 +2,26 @@
 # Entrypoint del backend: espera MySQL, asegura APP_KEY y migra.
 set -e
 
-DB_HOST="${DB_HOST:-mysql}"
-DB_PORT="${DB_PORT:-3306}"
+# Apache escucha en el puerto que asigne el hosting (Render usa PORT).
+APP_PORT="${PORT:-80}"
+sed -i "s/^Listen 80$/Listen ${APP_PORT}/" /etc/apache2/ports.conf
+sed -i "s/<VirtualHost \*:80>/<VirtualHost *:${APP_PORT}>/" /etc/apache2/sites-available/000-default.conf
 
-# Espera a que MySQL acepte conexiones (máx. ~60 s).
-i=0
-until php -r "\$c = @new PDO('mysql:host=${DB_HOST};port=${DB_PORT}', getenv('DB_USERNAME') ?: 'root', getenv('DB_PASSWORD') ?: ''); exit(0);" 2>/dev/null; do
-  i=$((i + 1))
-  if [ "$i" -ge 60 ]; then
-    echo "MySQL no responde en ${DB_HOST}:${DB_PORT} despues de 60 s" >&2
-    exit 1
-  fi
-  echo "Esperando MySQL en ${DB_HOST}:${DB_PORT}... (${i}s)"
-  sleep 1
-done
+# Espera a MySQL solo si la conexión es mysql (pgsql/Supabase no lo necesita).
+if [ "${DB_CONNECTION:-mysql}" = "mysql" ]; then
+  DB_HOST="${DB_HOST:-mysql}"
+  DB_PORT="${DB_PORT:-3306}"
+  i=0
+  until php -r "\$c = @new PDO('mysql:host=${DB_HOST};port=${DB_PORT}', getenv('DB_USERNAME') ?: 'root', getenv('DB_PASSWORD') ?: ''); exit(0);" 2>/dev/null; do
+    i=$((i + 1))
+    if [ "$i" -ge 60 ]; then
+      echo "MySQL no responde en ${DB_HOST}:${DB_PORT} despues de 60 s" >&2
+      exit 1
+    fi
+    echo "Esperando MySQL en ${DB_HOST}:${DB_PORT}... (${i}s)"
+    sleep 1
+  done
+fi
 
 # APP_KEY:key:generate escribe en .env, así que si viene por entorno
 # se exporta para que artisan la vea en este mismo arranque.
