@@ -2,8 +2,6 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Enums\PostulacionEstado;
-use App\Enums\VentanaPostulacion;
 use App\Http\Controllers\Api\Concerns\GestionaPostulacionPropia;
 use App\Http\Controllers\Api\Concerns\IdentificadorConvocatoria;
 use App\Http\Controllers\Controller;
@@ -18,7 +16,6 @@ use App\Services\DocumentosDePostulacion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -296,7 +293,7 @@ class PostulacionDocumentoController extends Controller
      * Rastro de la gestión documental del admin: quién tocó qué documento de
      * quién. Las acciones sobre archivos ajenos nunca deben ser anónimas.
      *
-     * @param array<string, mixed> $contexto
+     * @param  array<string, mixed>  $contexto
      */
     private function auditar(Request $request, string $accion, Postulacion $postulacion, array $contexto = []): void
     {
@@ -409,6 +406,11 @@ class PostulacionDocumentoController extends Controller
                         'nombre' => $parametro->nombre,
                     ],
                     'obligatorio' => (bool) $parametro->pivot->obligatorio,
+                    // Peso (%) configurado por el gestor para este documento en
+                    // esta convocatoria. null = sin configurar (reparto igual).
+                    'ponderacion' => $parametro->pivot->ponderacion === null
+                        ? null
+                        : round((float) $parametro->pivot->ponderacion, 2),
                     'estado' => $noAplica ? 'no_aplica' : ($subido ? 'subido' : 'pendiente'),
                     'archivo' => $subido ? $this->archivoResumen($subido) : null,
                 ];

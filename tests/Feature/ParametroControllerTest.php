@@ -200,4 +200,63 @@ class ParametroControllerTest extends TestCase
 
         $this->actingAs($usuario)->getJson('/api/parametros')->assertForbidden();
     }
+
+    // ── POST /api/parametros/documentos (documento nuevo del catálogo) ──
+
+    public function test_instructor_crea_un_documento_nuevo_en_el_catalogo(): void
+    {
+        $instructor = $this->usuario(Role::Instructor);
+
+        $respuesta = $this->actingAs($instructor)
+            ->postJson('/api/parametros/documentos', ['nombre' => 'Especialización en SST'])
+            ->assertCreated()
+            ->assertJsonPath('data.nombre', 'Especialización en SST')
+            ->assertJsonPath('data.codigo', null);
+
+        $this->assertDatabaseHas('parametros', [
+            'id' => $respuesta->json('data.id'),
+            'nombre' => 'Especialización en SST',
+            'activo' => true,
+            'es_sistema' => false,
+        ]);
+
+        // Aparece en el catálogo del tema tipo_documento.
+        $codigos = collect(
+            $this->actingAs($instructor)
+                ->getJson('/api/parametros?tema=tipo_documento')
+                ->assertOk()
+                ->json('data')
+        )->pluck('nombre')->all();
+
+        $this->assertContains('Especialización en SST', $codigos);
+    }
+
+    public function test_no_permite_documentos_duplicados_sin_distinguir_mayusculas(): void
+    {
+        $instructor = $this->usuario(Role::Instructor);
+
+        $this->actingAs($instructor)
+            ->postJson('/api/parametros/documentos', ['nombre' => 'Maestría en Educación'])
+            ->assertCreated();
+
+        $this->actingAs($instructor)
+            ->postJson('/api/parametros/documentos', ['nombre' => '  maestrÍa en educación '])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('nombre');
+    }
+
+    public function test_nombre_de_documento_muy_corto_se_rechaza(): void
+    {
+        $this->actingAs($this->usuario(Role::Instructor))
+            ->postJson('/api/parametros/documentos', ['nombre' => 'ab'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('nombre');
+    }
+
+    public function test_aspirante_no_puede_crear_documentos(): void
+    {
+        $this->actingAs($this->usuario(Role::Aspirante))
+            ->postJson('/api/parametros/documentos', ['nombre' => 'Diplomado'])
+            ->assertForbidden();
+    }
 }

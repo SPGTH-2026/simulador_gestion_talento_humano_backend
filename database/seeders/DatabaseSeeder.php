@@ -122,5 +122,11 @@ class DatabaseSeeder extends Seeder
         // Catálogo de parámetros del negocio (temas, estados, documentos, etc.).
         // Idempotente: se puede correr varias veces sin duplicar.
         $this->call(ParametroSeeder::class);
+
+        // Andamio del módulo de Evaluación: convocatoria + aspirantes postulados.
+        $this->call(EvaluacionDemoSeeder::class);
+
+        // Convocatoria con todos los documentos cargados, para probar la evaluación.
+        $this->call(EvaluacionDocsCompletoSeeder::class);
     }
 }
