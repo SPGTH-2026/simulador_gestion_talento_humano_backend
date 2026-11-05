@@ -6,6 +6,7 @@ use App\Enums\Role;
 use App\Http\Controllers\Controller;
 use App\Models\Convocatoria;
 use App\Models\Evaluacion;
+use App\Models\Ficha;
 use App\Models\Postulacion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,6 +25,7 @@ class EvaluacionController extends Controller
     {
         $datos = $request->validate([
             'convocatoria_id' => ['nullable', 'integer', 'exists:convocatorias,id'],
+            'ficha_id' => ['nullable', 'integer', 'exists:fichas,id'],
             'search' => ['nullable', 'string', 'max:120'],
         ]);
 
@@ -43,6 +45,10 @@ class EvaluacionController extends Controller
 
         if ($datos['convocatoria_id'] ?? null) {
             $query->where('convocatoria_id', $datos['convocatoria_id']);
+        }
+        // Filtro por ficha: la ficha vive en la convocatoria, no en la postulación.
+        if ($datos['ficha_id'] ?? null) {
+            $query->whereHas('convocatoria', fn ($q) => $q->where('ficha_id', $datos['ficha_id']));
         }
         if ($datos['search'] ?? null) {
             $b = $datos['search'];
@@ -76,6 +82,11 @@ class EvaluacionController extends Controller
                     ->whereIn('ficha_id', $actor->fichaIds())
                     ->orderByDesc('id')
                     ->get(['id', 'nombre as titulo', 'estado_id']),
+                // Opciones del filtro por ficha: solo las del alcance del usuario.
+                'fichas' => Ficha::query()
+                    ->whereIn('id', $actor->fichaIds())
+                    ->orderBy('codigo')
+                    ->get(['id', 'codigo', 'nombre_programa']),
             ],
         ]);
     }
