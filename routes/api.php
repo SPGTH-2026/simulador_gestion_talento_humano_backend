@@ -78,6 +78,10 @@ Route::middleware(['auth:sanctum', 'verified', 'can:usuarios:gestionar'])->group
 // (FichaController:index): GET /api/convocatorias/fichas se retiró en el Paso 2b.
 Route::middleware(['auth:sanctum', 'verified'])->group(function () {
     Route::get('parametros', [ParametroController::class, 'index'])->middleware('can:convocatorias:ver');
+    // Documento NUEVO del catálogo (especialización, maestría, etc.) para
+    // sumarlo a una convocatoria. Solo quien gestiona convocatorias.
+    Route::post('parametros/documentos', [ParametroController::class, 'storeDocumento'])
+        ->middleware('can:convocatorias:gestionar');
 
     Route::get('convocatorias', [ConvocatoriaController::class, 'index'])->middleware('can:convocatorias:ver');
     Route::post('convocatorias', [ConvocatoriaController::class, 'store'])->middleware('can:convocatorias:gestionar');

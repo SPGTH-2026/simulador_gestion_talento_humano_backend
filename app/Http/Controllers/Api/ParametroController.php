@@ -57,6 +57,64 @@ class ParametroController extends Controller
     }
 
     /**
+     * Crea un documento NUEVO en el catálogo (tema tipo_documento) para que el
+     * gestor lo pueda sumar a una convocatoria con su propio porcentaje.
+     *
+     * Pensado para requisitos que no están en el catálogo base (especialización,
+     * maestría, diplomado, etc.). El documento nace activo, sin código y sin ser
+     * de sistema: no altera las reglas de los obligatorios fijos.
+     *
+     * El nombre es único dentro del tema (sin distinguir mayúsculas), para no
+     * llenar el catálogo de duplicados.
+     */
+    public function storeDocumento(Request $request): JsonResponse
+    {
+        $datos = $request->validate([
+            'nombre' => ['required', 'string', 'min:3', 'max:80'],
+        ]);
+
+        $tema = ParametroTema::where('codigo', 'tipo_documento')->first();
+
+        if (! $tema) {
+            abort(404, 'No existe el catálogo de documentos');
+        }
+
+        $nombre = trim($datos['nombre']);
+
+        $duplicado = Parametro::query()
+            ->where('tema_id', $tema->id)
+            ->whereRaw('LOWER(nombre) = ?', [mb_strtolower($nombre)])
+            ->exists();
+
+        if ($duplicado) {
+            return response()->json([
+                'message' => 'Ya existe un documento con ese nombre.',
+                'errors' => ['nombre' => ['Ya existe un documento con ese nombre.']],
+            ], 422);
+        }
+
+        $parametro = Parametro::create([
+            'tema_id' => $tema->id,
+            'codigo' => null,
+            'nombre' => $nombre,
+            'orden' => ((int) Parametro::where('tema_id', $tema->id)->max('orden')) + 1,
+            'activo' => true,
+            'es_sistema' => false,
+            'es_defecto' => false,
+        ]);
+
+        return response()->json([
+            'data' => [
+                'id' => $parametro->id,
+                'codigo' => $parametro->codigo,
+                'nombre' => $parametro->nombre,
+                'es_sistema' => false,
+                'es_defecto' => false,
+            ],
+        ], 201);
+    }
+
+    /**
      * Parámetros activos de un tema, ordenados por 'orden' y luego por 'nombre',
      * con solo los campos públicos.
      *

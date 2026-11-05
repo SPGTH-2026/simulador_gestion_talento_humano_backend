@@ -246,4 +246,75 @@ class EvaluacionTest extends TestCase
             ->assertJsonPath('data.0.puntaje_total', '88.50')
             ->assertJsonPath('data.0.observaciones', 'Recomendado');
     }
+
+    // ── Porcentajes configurables por convocatoria ─────────────────────
+
+    /** Adjunta documentos a la convocatoria con su ponderación (null = sin configurar). */
+    private function documentosConPeso(Convocatoria $convocatoria, array $codigos): array
+    {
+        $ids = [];
+        foreach ($codigos as $codigo => $peso) {
+            $id = $this->parametroId('tipo_documento', $codigo);
+            $convocatoria->documentos()->attach($id, [
+                'obligatorio' => true,
+                'ponderacion' => $peso,
+            ]);
+            $ids[$codigo] = $id;
+        }
+
+        return $ids;
+    }
+
+    public function test_cumplimiento_usa_los_porcentajes_de_la_convocatoria(): void
+    {
+        $ficha = $this->ficha('2896411');
+        $evaluador = $this->usuario(Role::Aprendiz, 'evaluador', ['ficha_id' => $ficha->id]);
+        $convocatoria = $this->convocatoria($ficha);
+        $postulacion = $this->postulacion($convocatoria);
+
+        // Hoja de vida vale 80 % y el documento de identidad 20 %.
+        $ids = $this->documentosConPeso($convocatoria, [
+            'hoja_de_vida' => 80,
+            'documento_identidad' => 20,
+        ]);
+
+        // Solo cumple el documento que vale 80 % → 80 % de cumplimiento.
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
+            'estado' => 'finalizada',
+            'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 80, 'ponderacion' => 1]],
+            'perfil' => [
+                'doc-'.$ids['hoja_de_vida'] => true,
+                'doc-'.$ids['documento_identidad'] => false,
+            ],
+            // Se envía un valor distinto a propósito: el servidor manda.
+            'cumplimiento' => 100,
+        ])->assertOk()
+            ->assertJsonPath('data.evaluacion.cumplimiento', 80)
+            ->assertJsonPath('data.evaluacion.pasa_seleccion', true);
+    }
+
+    public function test_sin_porcentajes_configurados_reparte_en_partes_iguales(): void
+    {
+        $ficha = $this->ficha('2896411');
+        $evaluador = $this->usuario(Role::Aprendiz, 'evaluador', ['ficha_id' => $ficha->id]);
+        $convocatoria = $this->convocatoria($ficha);
+        $postulacion = $this->postulacion($convocatoria);
+
+        $ids = $this->documentosConPeso($convocatoria, [
+            'hoja_de_vida' => null,
+            'documento_identidad' => null,
+        ]);
+
+        // Dos documentos sin peso y solo uno cumplido → 50 %.
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
+            'estado' => 'finalizada',
+            'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 50, 'ponderacion' => 1]],
+            'perfil' => [
+                'doc-'.$ids['hoja_de_vida'] => true,
+                'doc-'.$ids['documento_identidad'] => false,
+            ],
+        ])->assertOk()
+            ->assertJsonPath('data.evaluacion.cumplimiento', 50)
+            ->assertJsonPath('data.evaluacion.pasa_seleccion', false);
+    }
 }

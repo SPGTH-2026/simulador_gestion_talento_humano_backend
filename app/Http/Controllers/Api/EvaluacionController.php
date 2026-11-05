@@ -46,7 +46,13 @@ class EvaluacionController extends Controller
         }
         if ($datos['search'] ?? null) {
             $b = $datos['search'];
-            $query->whereHas('user', fn ($q) => $q->where('name', 'like', "%{$b}%")->orWhere('email', 'like', "%{$b}%"));
+            // LIKE es sensible a mayúsculas en PostgreSQL (en MySQL no). Se
+            // compara en minúsculas para que el buscador funcione igual en
+            // ambas bases.
+            $patron = '%'.mb_strtolower($b).'%';
+            $query->whereHas('user', fn ($q) => $q
+                ->whereRaw('LOWER(name) LIKE ?', [$patron])
+                ->orWhereRaw('LOWER(email) LIKE ?', [$patron]));
         }
 
         $pagina = $query->orderBy('id')->paginate(20);
@@ -119,7 +125,13 @@ class EvaluacionController extends Controller
             $evaluacion->observaciones = $datos['observaciones'] ?? null;
             $evaluacion->estado = $datos['estado'] ?? 'en_proceso';
             $evaluacion->perfil = $datos['perfil'] ?? null;
-            $evaluacion->cumplimiento = $datos['cumplimiento'] ?? null;
+
+            // El cumplimiento se calcula en el SERVIDOR con la ponderación que
+            // el gestor configuró para ESTA convocatoria: el cliente solo manda
+            // qué documentos cumplió (perfil). Si la convocatoria no tiene
+            // documentos, se respeta el valor enviado (compatibilidad).
+            $calculado = $this->calcularCumplimiento($postulacion, $datos['perfil'] ?? null);
+            $evaluacion->cumplimiento = $calculado ?? ($datos['cumplimiento'] ?? null);
             $evaluacion->pasa_seleccion = ($evaluacion->cumplimiento !== null)
                 ? $evaluacion->cumplimiento >= 60
                 : null;
@@ -218,6 +230,84 @@ class EvaluacionController extends Controller
         if (! $fichaId || ! in_array((int) $fichaId, $request->user()->fichaIds(), true)) {
             abort(403, 'No tienes alcance sobre esta postulación');
         }
+    }
+
+    /**
+     * Pesos (%) de los documentos de la convocatoria, indexados por id del
+     * parámetro (tipo_documento). Si la convocatoria no configuró ponderaciones
+     * (todas null) se reparte el 100 % en partes iguales, que es el
+     * comportamiento histórico. Si solo algunas están configuradas (no debería
+     * pasar: el alta lo valida), el resto se reparte con lo que sobra.
+     *
+     * @return array<int, float>
+     */
+    private function pesosDocumentos(Postulacion $postulacion): array
+    {
+        $documentos = $postulacion->convocatoria?->documentos ?? collect();
+
+        if ($documentos->isEmpty()) {
+            return [];
+        }
+
+        $pesos = [];
+        $sinPeso = [];
+        $suma = 0.0;
+
+        foreach ($documentos as $documento) {
+            $valor = $documento->pivot->ponderacion;
+
+            if ($valor === null) {
+                $sinPeso[] = (int) $documento->id;
+
+                continue;
+            }
+
+            $pesos[(int) $documento->id] = (float) $valor;
+            $suma += (float) $valor;
+        }
+
+        if ($sinPeso === []) {
+            return $pesos;
+        }
+
+        $cuota = max(0.0, 100.0 - $suma) / count($sinPeso);
+
+        foreach ($sinPeso as $id) {
+            $pesos[$id] = $cuota;
+        }
+
+        return $pesos;
+    }
+
+    /**
+     * Cumplimiento ponderado (0-100) a partir de lo marcado por el evaluador.
+     *
+     * El `perfil` llega como { "doc-{parametro_id}": true|false } desde la
+     * pantalla de evaluación. Se suma el peso de cada documento marcado como
+     * cumplido sobre el total de pesos configurados.
+     */
+    private function calcularCumplimiento(Postulacion $postulacion, ?array $perfil): ?int
+    {
+        $pesos = $this->pesosDocumentos($postulacion);
+
+        if ($pesos === []) {
+            return null;
+        }
+
+        $total = array_sum($pesos);
+
+        if ($total <= 0) {
+            return null;
+        }
+
+        $obtenido = 0.0;
+        foreach ($pesos as $parametroId => $peso) {
+            if (! empty($perfil["doc-{$parametroId}"])) {
+                $obtenido += $peso;
+            }
+        }
+
+        return (int) round(min(100.0, ($obtenido / $total) * 100));
     }
 
     private function presentar(Postulacion $p, ?Evaluacion $e): array
