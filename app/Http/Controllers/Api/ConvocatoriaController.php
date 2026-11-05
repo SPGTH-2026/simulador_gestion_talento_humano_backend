@@ -1289,8 +1289,12 @@ class ConvocatoriaController extends Controller
         if ($user->can('convocatorias:gestionar')) {
             $estadoPostulada = $this->parametroId('estado_postulacion', PostulacionEstado::Postulada->value);
 
+            // Solo cuentan los postulantes activos, para que el número coincida con
+            // lo que el gestor puede ver en el portafolio.
             $query->withCount([
-                'postulaciones as postulantes_count' => fn ($sub) => $sub->where('estado_id', $estadoPostulada),
+                'postulaciones as postulantes_count' => fn ($sub) => $sub
+                    ->where('estado_id', $estadoPostulada)
+                    ->whereHas('user', fn ($u) => $u->where('active', true)),
             ]);
 
             return;
@@ -1310,7 +1314,9 @@ class ConvocatoriaController extends Controller
             $estadoPostulada = $this->parametroId('estado_postulacion', PostulacionEstado::Postulada->value);
 
             $convocatoria->loadCount([
-                'postulaciones as postulantes_count' => fn ($sub) => $sub->where('estado_id', $estadoPostulada),
+                'postulaciones as postulantes_count' => fn ($sub) => $sub
+                    ->where('estado_id', $estadoPostulada)
+                    ->whereHas('user', fn ($u) => $u->where('active', true)),
             ]);
 
             return;
