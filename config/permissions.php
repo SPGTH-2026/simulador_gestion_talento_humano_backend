@@ -31,8 +31,12 @@ return [
             'dashboard:ver', 'convocatorias:ver', 'convocatorias:gestionar',
             'documentos:ver',
             'evaluacion:ver', 'evaluacion:evaluar', 'seleccion:ver', 'seleccion:decidir', 'reportes:ver',
+            'propio:evaluaciones',
         ],
-        'evaluador' => ['dashboard:ver', 'documentos:ver', 'evaluacion:ver', 'evaluacion:evaluar', 'reportes:ver'],
+        'evaluador' => [
+            'dashboard:ver', 'documentos:ver', 'evaluacion:ver', 'evaluacion:evaluar', 'reportes:ver',
+            'propio:evaluaciones',
+        ],
         'seleccionador' => ['dashboard:ver', 'seleccion:ver', 'seleccion:decidir', 'reportes:ver'],
         'gestor_convocatorias' => ['dashboard:ver', 'convocatorias:ver', 'convocatorias:gestionar', 'reportes:ver'],
     ],

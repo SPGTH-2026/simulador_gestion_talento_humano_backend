@@ -78,11 +78,16 @@ class Convocatoria extends Model
         return $this->hasMany(ConvocatoriaSkill::class);
     }
 
-    /** Documentos requeridos (parámetros del tema tipo_documento). */
+    /**
+     * Documentos requeridos (parámetros del tema tipo_documento).
+     *
+     * `ponderacion` es el peso (%) de cada documento en la evaluación de ESTA
+     * convocatoria; null = no configurado (reparto equitativo).
+     */
     public function documentos(): BelongsToMany
     {
         return $this->belongsToMany(Parametro::class, 'convocatoria_documentos', 'convocatoria_id', 'parametro_id')
-            ->withPivot('obligatorio');
+            ->withPivot('obligatorio', 'ponderacion');
     }
 
     /** Postulaciones recibidas. La ficha de la postulación vive aquí, no en la postulación. */

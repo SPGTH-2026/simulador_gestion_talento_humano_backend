@@ -505,6 +505,12 @@ class ConvocatoriaController extends Controller
                 : null;
         }
 
+        // Porcentajes: se validan sobre la lista FINAL (con los obligatorios que
+        // agrega el backend) para que la suma sea siempre 100 %.
+        if ($documentos !== null) {
+            $this->validarPonderaciones($this->conDocumentosObligatorios($documentos), $errores);
+        }
+
         // Skills: se normalizan ANTES de lanzar los errores, para que un
         // nombre repetido, demasiado largo o un parametro_id inválido
         // devuelvan su 422 y no se guarden de más.
@@ -598,11 +604,13 @@ class ConvocatoriaController extends Controller
      * Documentos válidos del tema tipo_documento enviados por el gestor. Acepta
      * dos formatos por ítem:
      *  - clásico: un código (string) o un id (int).
-     *  - extendido: ['codigo'|'id' => ..., 'obligatorio' => bool]. Se acepta por
-     *    compatibilidad, pero el valor 'obligatorio' se IGNORA: la obligatoriedad
-     *    la decide el backend (config/convocatorias.php), no el cliente.
-     * Devuelve una lista de ['id' => int] sin duplicados (gana la primera
-     * aparición), o null si no se envió la clave.
+     *  - extendido: ['codigo'|'id' => ..., 'ponderacion' => 0-100]. El valor
+     *    'obligatorio' se IGNORA: la obligatoriedad la decide el backend
+     *    (config/convocatorias.php), no el cliente.
+     * La ponderación SÍ se respeta: es la configurada por el gestor para esta
+     * convocatoria (null = no configurada, reparto equitativo en evaluación).
+     * Devuelve una lista de ['id' => int, 'ponderacion' => float|null] sin
+     * duplicados (gana la primera aparición), o null si no se envió la clave.
      */
     private function normalizarDocumentos(?array $documentos, array &$errores): ?array
     {
@@ -613,10 +621,21 @@ class ConvocatoriaController extends Controller
         $normalizados = [];
         foreach (array_values($documentos) as $indice => $documento) {
             $referencia = $documento;
+            $ponderacion = null;
 
             if (is_array($documento)) {
                 // El 'obligatorio' del formato extendido se acepta pero se ignora.
                 $referencia = $documento['codigo'] ?? $documento['id'] ?? null;
+
+                $valor = $documento['ponderacion'] ?? null;
+                if ($valor !== null && $valor !== '') {
+                    if (! is_numeric($valor) || (float) $valor < 0 || (float) $valor > 100) {
+                        $errores["documentos.{$indice}"][] = 'El porcentaje del documento debe ser un número entre 0 y 100.';
+
+                        continue;
+                    }
+                    $ponderacion = round((float) $valor, 2);
+                }
             }
 
             $parametro = null;
@@ -641,11 +660,48 @@ class ConvocatoriaController extends Controller
 
             $id = (int) $parametro->id;
             if (! array_key_exists($id, $normalizados)) {
-                $normalizados[$id] = ['id' => $id];
+                $normalizados[$id] = ['id' => $id, 'ponderacion' => $ponderacion];
             }
         }
 
         return array_values($normalizados);
+    }
+
+    /**
+     * Valida la configuración de porcentajes de los documentos.
+     *
+     * Reglas:
+     *  - Sin ninguna ponderación enviada: válido. La convocatoria queda sin
+     *    configurar y la evaluación reparte el 100 % en partes iguales.
+     *  - Con ponderaciones: TODOS los documentos deben tener la suya y la suma
+     *    debe ser 100 % (±0,01 por redondeos de dos decimales).
+     */
+    private function validarPonderaciones(array $documentos, array &$errores): void
+    {
+        $configurados = array_filter(
+            $documentos,
+            fn ($documento) => ($documento['ponderacion'] ?? null) !== null,
+        );
+
+        if ($configurados === []) {
+            return;
+        }
+
+        if (count($configurados) !== count($documentos)) {
+            $errores['documentos'][] = 'Define el porcentaje de todos los documentos: deben sumar 100%.';
+
+            return;
+        }
+
+        $suma = array_sum(array_map(
+            fn ($documento) => (float) $documento['ponderacion'],
+            $documentos,
+        ));
+
+        if (abs($suma - 100) > 0.01) {
+            $errores['documentos'][] = 'Los porcentajes de los documentos deben sumar 100% (suman '
+                .number_format($suma, 2, ',', '.').'%).';
+        }
     }
 
     /**
@@ -908,8 +964,12 @@ class ConvocatoriaController extends Controller
      * (libreta_militar y tarjeta_profesional). Los obligatorios van primero y
      * siempre, aunque el gestor no los haya enviado. Sin duplicados.
      *
-     * @param  array<int, array{id:int}>|null  $documentos
-     * @return array<int, array{id:int, obligatorio:bool}>
+     * La ponderación enviada por el gestor se conserva; los obligatorios que el
+     * backend agrega por su cuenta quedan sin ponderación (null) y se validan
+     * después en validarPonderaciones.
+     *
+     * @param  array<int, array{id:int, ponderacion:float|null}>|null  $documentos
+     * @return array<int, array{id:int, obligatorio:bool, ponderacion:float|null}>
      */
     private function conDocumentosObligatorios(?array $documentos): array
     {
@@ -920,18 +980,26 @@ class ConvocatoriaController extends Controller
 
         // 1) Los siempre obligatorios, en el orden de config y con true.
         foreach (array_keys($obligatorios) as $id) {
-            $final[$id] = ['id' => $id, 'obligatorio' => true];
+            $final[$id] = ['id' => $id, 'obligatorio' => true, 'ponderacion' => null];
         }
 
-        // 2) Los elegidos por el gestor (sin repetir los obligatorios).
+        // 2) Los elegidos por el gestor (sin repetir los obligatorios). Si el
+        //    gestor envió ponderación para un obligatorio, se conserva.
         foreach ($documentos ?? [] as $documento) {
             $id = (int) $documento['id'];
+            $ponderacion = $documento['ponderacion'] ?? null;
 
             if (array_key_exists($id, $final)) {
+                $final[$id]['ponderacion'] = $ponderacion;
+
                 continue;
             }
 
-            $final[$id] = ['id' => $id, 'obligatorio' => isset($opcionalesObligatorios[$id])];
+            $final[$id] = [
+                'id' => $id,
+                'obligatorio' => isset($opcionalesObligatorios[$id]),
+                'ponderacion' => $ponderacion,
+            ];
         }
 
         return array_values($final);
@@ -940,13 +1008,17 @@ class ConvocatoriaController extends Controller
     /**
      * Reemplaza los documentos de la convocatoria. La lista recibida ya viene
      * fusionada (conDocumentosObligatorios): los obligatorios no se pueden quitar
-     * y se guardan con obligatorio = true.
+     * y se guardan con obligatorio = true. La ponderación es la configurada por
+     * el gestor para esta convocatoria (null = sin configurar).
      */
     private function reemplazarDocumentos(Convocatoria $convocatoria, ?array $documentos): void
     {
         $sincronizar = [];
         foreach ($documentos ?? [] as $documento) {
-            $sincronizar[(int) $documento['id']] = ['obligatorio' => (bool) ($documento['obligatorio'] ?? false)];
+            $sincronizar[(int) $documento['id']] = [
+                'obligatorio' => (bool) ($documento['obligatorio'] ?? false),
+                'ponderacion' => $documento['ponderacion'] ?? null,
+            ];
         }
 
         $convocatoria->documentos()->sync($sincronizar);
@@ -1102,20 +1174,32 @@ class ConvocatoriaController extends Controller
         return $claves;
     }
 
-    /** ¿Difiere el conjunto de ids de documentos del guardado? */
+    /**
+     * ¿Difiere la configuración de documentos del guardado? Se comparan los ids
+     * y sus ponderaciones: los porcentajes son parte de la configuración de la
+     * convocatoria y, con postulaciones, también quedan bloqueados (Regla H).
+     */
     private function documentosDistintos(Convocatoria $actual, array $documentos): bool
     {
         $actuales = $actual->documentos()->get()
-            ->map(fn ($parametro) => (int) $parametro->id)
+            ->mapWithKeys(fn ($parametro) => [
+                (int) $parametro->id => $parametro->pivot->ponderacion === null
+                    ? null
+                    : round((float) $parametro->pivot->ponderacion, 2),
+            ])
             ->all();
 
         $nuevos = [];
         foreach ($documentos as $documento) {
-            $nuevos[] = (int) $documento['id'];
+            $ponderacion = $documento['ponderacion'] ?? null;
+
+            $nuevos[(int) $documento['id']] = $ponderacion === null
+                ? null
+                : round((float) $ponderacion, 2);
         }
 
-        sort($actuales);
-        sort($nuevos);
+        ksort($actuales);
+        ksort($nuevos);
 
         return $actuales !== $nuevos;
     }
@@ -1375,6 +1459,11 @@ class ConvocatoriaController extends Controller
             // (config/convocatorias.php) y para los opcionales que el gestor
             // incluyó como obligatorios.
             'obligatorio' => (bool) $d->pivot->obligatorio,
+            // Peso (%) de este documento en la evaluación de esta convocatoria.
+            // null = sin configurar (reparto equitativo en la evaluación).
+            'ponderacion' => $d->pivot->ponderacion === null
+                ? null
+                : round((float) $d->pivot->ponderacion, 2),
         ])->values()->all();
     }
 
