@@ -150,14 +150,10 @@ trait GestionaPostulacionPropia
     }
 
     /**
-     * Alcance por ficha para revisores: fuera de su ficha -> 404 (no revela).
-     *
-     * @param bool $permitirBorrador Los gestores documentales (permiso
-     *                              'documentos:gestionar') sí entran a los
-     *                              borradores: un documento de un borrador es
-     *                              un documento que hay que poder corregir.
+     * Alcance por ficha para revisores (solo lectura): fuera de su ficha -> 404
+     * (no revela). Un borrador todavía no es un postulante: no entra a revisión.
      */
-    private function exigirRevision(Request $request, Postulacion $postulacion, bool $permitirBorrador = false): void
+    private function exigirRevision(Request $request, Postulacion $postulacion): void
     {
         $postulacion->loadMissing(['convocatoria', 'estado']);
 
@@ -165,8 +161,7 @@ trait GestionaPostulacionPropia
             abort(404, 'Postulación no encontrada.');
         }
 
-        // Un borrador todavía no es un postulante: no entra a revisión.
-        if (! $permitirBorrador && $postulacion->estado?->codigo === PostulacionEstado::Borrador->value) {
+        if ($postulacion->estado?->codigo === PostulacionEstado::Borrador->value) {
             abort(404, 'Postulación no encontrada.');
         }
     }

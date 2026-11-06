@@ -437,7 +437,101 @@ class ConvocatoriaEdicionBloqueadaTest extends TestCase
                 'documentos' => [['codigo' => 'tarjeta_profesional', 'obligatorio' => true]],
             ])
             ->assertStatus(422)
-            ->assertJsonPath('errors.documentos.0', $this->msg('documentos'));
+            ->assertJsonPath('errors.documentos.0', 'No se pueden agregar, quitar ni cambiar la obligatoriedad de los documentos porque la convocatoria ya tiene postulaciones.');
+    }
+
+    public function test_con_postulacion_no_se_pueden_agregar_documentos(): void
+    {
+        $ficha = $this->ficha();
+        $instructor = $this->instructor($ficha);
+        $convocatoria = $this->conDocumentos($this->publicable($ficha, $instructor), ['hoja_de_vida' => true]);
+        $this->postular($convocatoria, $this->aspirante($ficha));
+
+        $this->actingAs($instructor)
+            ->patchJson('/api/convocatorias/'.$convocatoria->id, [
+                'documentos' => [
+                    ['codigo' => 'hoja_de_vida', 'obligatorio' => true],
+                    ['codigo' => 'libreta_militar', 'obligatorio' => false],
+                ],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.documentos.0', 'No se pueden agregar, quitar ni cambiar la obligatoriedad de los documentos porque la convocatoria ya tiene postulaciones.');
+
+        $this->assertSame(['hoja_de_vida'], $convocatoria->fresh()->documentos->pluck('codigo')->all());
+    }
+
+    public function test_con_postulacion_no_se_pueden_quitar_documentos(): void
+    {
+        $ficha = $this->ficha();
+        $instructor = $this->instructor($ficha);
+        $convocatoria = $this->conDocumentos($this->publicable($ficha, $instructor), [
+            'hoja_de_vida' => true,
+            'libreta_militar' => false,
+        ]);
+        $this->postular($convocatoria, $this->aspirante($ficha));
+
+        $this->actingAs($instructor)
+            ->patchJson('/api/convocatorias/'.$convocatoria->id, [
+                'documentos' => [['codigo' => 'hoja_de_vida', 'obligatorio' => true]],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.documentos.0', 'No se pueden agregar, quitar ni cambiar la obligatoriedad de los documentos porque la convocatoria ya tiene postulaciones.');
+
+        $this->assertCount(2, $convocatoria->fresh()->documentos);
+    }
+
+    public function test_con_borrador_tampoco_se_pueden_agregar_documentos(): void
+    {
+        $ficha = $this->ficha();
+        $instructor = $this->instructor($ficha);
+        $convocatoria = $this->conDocumentos($this->publicable($ficha, $instructor), ['hoja_de_vida' => true]);
+        $this->borrador($convocatoria, $this->aspirante($ficha));
+
+        $this->actingAs($instructor)
+            ->patchJson('/api/convocatorias/'.$convocatoria->id, [
+                'documentos' => [
+                    ['codigo' => 'hoja_de_vida', 'obligatorio' => true],
+                    ['codigo' => 'libreta_militar', 'obligatorio' => false],
+                ],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.documentos.0', 'No se pueden agregar, quitar ni cambiar la obligatoriedad de los documentos porque la convocatoria ya tiene postulaciones.');
+    }
+
+    public function test_con_postulacion_el_mismo_conjunto_de_documentos_se_acepta(): void
+    {
+        $ficha = $this->ficha();
+        $instructor = $this->instructor($ficha);
+        $convocatoria = $this->conDocumentos($this->publicable($ficha, $instructor), ['hoja_de_vida' => true]);
+        $this->postular($convocatoria, $this->aspirante($ficha));
+
+        $this->actingAs($instructor)
+            ->patchJson('/api/convocatorias/'.$convocatoria->id, [
+                'nombre' => 'Nombre nuevo',
+                'documentos' => [['codigo' => 'hoja_de_vida', 'obligatorio' => true]],
+            ])
+            ->assertOk();
+
+        $this->assertSame('Nombre nuevo', $convocatoria->fresh()->nombre);
+    }
+
+    public function test_sin_postulaciones_se_pueden_agregar_documentos(): void
+    {
+        $ficha = $this->ficha();
+        $instructor = $this->instructor($ficha);
+        $convocatoria = $this->conDocumentos($this->publicable($ficha, $instructor), ['hoja_de_vida' => true]);
+
+        $this->actingAs($instructor)
+            ->patchJson('/api/convocatorias/'.$convocatoria->id, [
+                'documentos' => [
+                    ['codigo' => 'hoja_de_vida', 'obligatorio' => true],
+                    ['codigo' => 'libreta_militar', 'obligatorio' => false],
+                ],
+            ])
+            ->assertOk();
+
+        // libreta_militar entra; los obligatorios del backend también quedan.
+        $this->assertContains('libreta_militar', $convocatoria->fresh()->documentos->pluck('codigo')->all());
     }
 
     public function test_obligatoriedad_enviada_se_ignora_y_no_bloquea(): void
@@ -683,6 +777,40 @@ class ConvocatoriaEdicionBloqueadaTest extends TestCase
     // ── Utilidad ───────────────────────────────────────────────────────
 
     /** @return array{0: User, 1: Convocatoria} */
+    public function test_detalle_del_gestor_indica_si_hay_postulaciones(): void
+    {
+        $ficha = $this->ficha();
+        $instructor = $this->instructor($ficha);
+        $sinPostulaciones = $this->publicable($ficha, $instructor);
+
+        $this->actingAs($instructor)
+            ->getJson('/api/convocatorias/'.$sinPostulaciones->id)
+            ->assertOk()
+            ->assertJsonPath('data.tiene_postulaciones', false);
+
+        $this->postular($sinPostulaciones, $this->aspirante($ficha));
+
+        $this->actingAs($instructor)
+            ->getJson('/api/convocatorias/'.$sinPostulaciones->id)
+            ->assertOk()
+            ->assertJsonPath('data.tiene_postulaciones', true);
+    }
+
+    public function test_el_aspirante_no_recibe_tiene_postulaciones(): void
+    {
+        $ficha = $this->ficha();
+        $instructor = $this->instructor($ficha);
+        $convocatoria = $this->publicable($ficha, $instructor);
+        $this->postular($convocatoria, $this->aspirante($ficha));
+
+        $aspirante = $this->aspirante($ficha);
+
+        $this->actingAs($aspirante)
+            ->getJson('/api/convocatorias/'.$convocatoria->id)
+            ->assertOk()
+            ->assertJsonPath('data.tiene_postulaciones', false);
+    }
+
     private function publicadaConPostulada(array $overrides = []): array
     {
         $ficha = $this->ficha();

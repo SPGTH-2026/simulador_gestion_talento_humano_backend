@@ -5,7 +5,7 @@ return [
     'all' => [
         'dashboard:ver',
         'convocatorias:ver', 'convocatorias:gestionar', 'convocatorias:postular',
-        'documentos:ver', 'documentos:gestionar',
+        'documentos:ver',
         'evaluacion:ver', 'evaluacion:evaluar',
         'seleccion:ver', 'seleccion:decidir',
         'reportes:ver', 'supervision:gestionar', 'usuarios:gestionar',

@@ -15,7 +15,6 @@ use App\Models\User;
 use App\Services\DocumentosDePostulacion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -70,25 +69,6 @@ class PostulacionDocumentoController extends Controller
         return $this->guardarRequerido($request, $postulacion);
     }
 
-    /**
-     * Gestión documental del admin: sube o reemplaza un documento requerido de
-     * un aspirante. No exige ventana ni estado editable a propósito: también se
-     * corrigen borradores y postulaciones ya cerradas. El alcance por ficha lo
-     * impone exigirRevision().
-     */
-    public function storeGestion(Request $request, Postulacion $postulacion): JsonResponse
-    {
-        $this->exigirRevision($request, $postulacion, true);
-
-        $respuesta = $this->guardarRequerido($request, $postulacion);
-
-        $this->auditar($request, 'documento_requerido_reemplazado', $postulacion, [
-            'documento_id' => $respuesta->getData(true)['data']['id'] ?? null,
-        ]);
-
-        return $respuesta;
-    }
-
     /** Sube un documento ADICIONAL ("tipo otro"): título obligatorio, nota opcional, máx. config. */
     public function storeAdicional(Request $request, Postulacion $postulacion): JsonResponse
     {
@@ -96,24 +76,6 @@ class PostulacionDocumentoController extends Controller
         $this->exigirEditable($postulacion, 'documentos');
 
         return $this->guardarAdicional($request, $postulacion);
-    }
-
-    /**
-     * Gestión documental del admin: agrega un adicional u, opcionalmente,
-     * reemplaza uno existente (`documento_id`). Mismo alcance por ficha.
-     */
-    public function storeAdicionalGestion(Request $request, Postulacion $postulacion): JsonResponse
-    {
-        $this->exigirRevision($request, $postulacion, true);
-
-        $respuesta = $this->guardarAdicional($request, $postulacion);
-
-        $this->auditar($request, 'documento_adicional_gestionado', $postulacion, [
-            'documento_id' => $respuesta->getData(true)['data']['archivo']['id'] ?? null,
-            'reemplazo' => $request->filled('documento_id'),
-        ]);
-
-        return $respuesta;
     }
 
     /** Borra un documento (requerido o adicional) de MI postulación. */
@@ -124,25 +86,6 @@ class PostulacionDocumentoController extends Controller
         $this->exigirEditable($postulacion, 'documentos');
 
         $this->eliminarDocumento($documento);
-
-        return response()->json(null, 204);
-    }
-
-    /**
-     * Gestión documental del admin: borra un documento de un aspirante aunque la
-     * convocatoria esté cerrada o la evaluación haya comenzado.
-     */
-    public function destroyGestion(Request $request, Postulacion $postulacion, PostulacionDocumento $documento): JsonResponse
-    {
-        $this->exigirRevision($request, $postulacion, true);
-        $this->exigirDocumentoDeLaPostulacion($postulacion, $documento);
-
-        $this->eliminarDocumento($documento);
-
-        $this->auditar($request, 'documento_eliminado', $postulacion, [
-            'documento_id' => $documento->id,
-            'nombre_original' => $documento->nombre_original,
-        ]);
 
         return response()->json(null, 204);
     }
@@ -289,22 +232,6 @@ class PostulacionDocumentoController extends Controller
         $this->borrarArchivo($disco, $ruta);
     }
 
-    /**
-     * Rastro de la gestión documental del admin: quién tocó qué documento de
-     * quién. Las acciones sobre archivos ajenos nunca deben ser anónimas.
-     *
-     * @param  array<string, mixed>  $contexto
-     */
-    private function auditar(Request $request, string $accion, Postulacion $postulacion, array $contexto = []): void
-    {
-        Log::info('Gestión documental del administrador.', $contexto + [
-            'accion' => $accion,
-            'actor_id' => $request->user()?->id,
-            'postulacion_id' => $postulacion->id,
-            'aspirante_id' => $postulacion->user_id,
-        ]);
-    }
-
     // ── Reglas de acceso ───────────────────────────────────────────────
 
     private function exigirDocumentoDeLaPostulacion(Postulacion $postulacion, PostulacionDocumento $documento): void
@@ -434,6 +361,7 @@ class PostulacionDocumentoController extends Controller
         return [
             'postulacion' => [
                 'id' => $postulacion->id,
+                'user_id' => $postulacion->user_id,
                 'estado' => [
                     'codigo' => $postulacion->estado?->codigo,
                     'nombre' => $postulacion->estado?->nombre,

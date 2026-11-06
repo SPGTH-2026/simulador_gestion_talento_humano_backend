@@ -149,17 +149,18 @@ class ConvocatoriaController extends Controller
 
         // Se usa '!' como carácter de escape: es válido en MySQL, SQLite y
         // Postgres y no obliga a pelear con el escapado de la barra invertida.
+        // LOWER en ambos lados: LIKE de Postgres distingue mayúsculas (MySQL no).
         $escapado = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $termino);
         $patron = '%'.$escapado.'%';
 
         $query->where(function (Builder $sub) use ($patron, $buscaPorCodigo) {
-            $sub->whereRaw("nombre LIKE ? ESCAPE '!'", [$patron]);
+            $sub->whereRaw("LOWER(nombre) LIKE LOWER(?) ESCAPE '!'", [$patron]);
 
             if ($buscaPorCodigo) {
-                $sub->orWhereRaw("codigo LIKE ? ESCAPE '!'", [$patron]);
+                $sub->orWhereRaw("LOWER(codigo) LIKE LOWER(?) ESCAPE '!'", [$patron]);
             }
 
-            $sub->orWhereRaw("cargo LIKE ? ESCAPE '!'", [$patron]);
+            $sub->orWhereRaw("LOWER(cargo) LIKE LOWER(?) ESCAPE '!'", [$patron]);
         });
     }
 
@@ -251,6 +252,14 @@ class ConvocatoriaController extends Controller
 
             $normalizado = $this->validar($request, $actual);
 
+            // Documentos: con CUALQUIER postulación (también borrador) no se agregan,
+            // quitan ni cambian de obligatoriedad o porcentaje. Si el reenvío es
+            // idéntico se acepta y no se reescribe nada.
+            if ($normalizado['documentos'] !== null && $actual->postulaciones()->exists()) {
+                $this->bloquearDocumentosConPostulaciones($actual, $normalizado['documentos']);
+                $normalizado['documentos'] = null;
+            }
+
             if ($actual->estado?->codigo === ConvocatoriaEstado::Publicada->value
                 // Regla H: un BORRADOR todavía no es postulante y NO congela la
                 // convocatoria; cualquier otro estado (postulada/retirada) sí.
@@ -258,13 +267,10 @@ class ConvocatoriaController extends Controller
                     ->where('estado_id', '!=', $this->parametroId('estado_postulacion', PostulacionEstado::Borrador->value))
                     ->exists()) {
                 // Lanza 422 si algún campo bloqueado cambió. Si no, el reenvío
-                // idéntico se acepta; skills/documentos iguales no se reescriben.
+                // idéntico se acepta; skills iguales no se reescriben.
                 $this->bloquearCamposConPostulaciones($actual, $normalizado);
 
                 $normalizado['skills'] = null;
-                // Con postulaciones NO se reinyectan los obligatorios: los
-                // documentos guardados se dejan intactos (regla H).
-                $normalizado['documentos'] = null;
             } elseif ($normalizado['documentos'] !== null) {
                 // Sin el bloqueo de postulaciones, se garantizan los documentos
                 // siempre obligatorios (config/convocatorias.php).
@@ -1030,7 +1036,8 @@ class ConvocatoriaController extends Controller
      * Con CUALQUIER postulación (postulada o retirada) y la convocatoria
      * publicada, estos campos quedan bloqueados: cargo, area, vacantes,
      * salario_min, salario_max, tipo_convocatoria, tipo_empleo, tipo_contrato,
-     * modalidad, fecha_apertura, skills y documentos. Siempre editables: nombre,
+     * modalidad, fecha_apertura y skills. Los documentos se bloquean aparte, con
+     * cualquier postulación (bloquearDocumentosConPostulaciones). Siempre editables: nombre,
      * texts descriptivos y fecha_evaluacion. fecha_cierre: solo ampliar.
      *
      * Solo se bloquea si el valor enviado DIFIERE del guardado (el wizard
@@ -1094,11 +1101,6 @@ class ConvocatoriaController extends Controller
         if ($normalizado['skills'] !== null
             && $this->conjuntoSkills($normalizado['skills']) !== $this->conjuntoSkills($actual->skills()->pluck('nombre')->all())) {
             $errores['skills'][] = sprintf($bloqueado, 'skills');
-        }
-
-        // Documentos: conjunto de ids (la obligatoriedad no varía).
-        if ($normalizado['documentos'] !== null && $this->documentosDistintos($actual, $normalizado['documentos'])) {
-            $errores['documentos'][] = sprintf($bloqueado, 'documentos');
         }
 
         if ($errores !== []) {
@@ -1175,13 +1177,14 @@ class ConvocatoriaController extends Controller
     }
 
     /**
-     * ¿Difiere la configuración de documentos del guardado? Se comparan los ids
-     * y sus ponderaciones: los porcentajes son parte de la configuración de la
-     * convocatoria y, con postulaciones, también quedan bloqueados (Regla H).
+     * Con postulaciones, los documentos requeridos no se pueden agregar, quitar ni
+     * cambiar sus porcentajes. La obligatoriedad no la envía el cliente (la decide
+     * el backend), así que no puede cambiarse por esta vía. Se compara el conjunto
+     * enviado contra el guardado, sin reinyectar obligatorios.
      */
-    private function documentosDistintos(Convocatoria $actual, array $documentos): bool
+    private function bloquearDocumentosConPostulaciones(Convocatoria $actual, array $documentos): void
     {
-        $actuales = $actual->documentos()->get()
+        $guardados = $actual->documentos()->get()
             ->mapWithKeys(fn ($parametro) => [
                 (int) $parametro->id => $parametro->pivot->ponderacion === null
                     ? null
@@ -1198,10 +1201,14 @@ class ConvocatoriaController extends Controller
                 : round((float) $ponderacion, 2);
         }
 
-        ksort($actuales);
+        ksort($guardados);
         ksort($nuevos);
 
-        return $actuales !== $nuevos;
+        if ($guardados !== $nuevos) {
+            throw ValidationException::withMessages([
+                'documentos' => ['No se pueden agregar, quitar ni cambiar la obligatoriedad de los documentos porque la convocatoria ya tiene postulaciones.'],
+            ]);
+        }
     }
 
     // ── Autorización ───────────────────────────────────────────────────
@@ -1414,6 +1421,8 @@ class ConvocatoriaController extends Controller
             'fecha_apertura' => $c->fecha_apertura?->toDateString(),
             'fecha_cierre' => $c->fecha_cierre?->toDateString(),
             'fecha_evaluacion' => $c->fecha_evaluacion?->toDateString(),
+            // Solo para quien gestiona: el formulario bloquea la etapa de documentos.
+            'tiene_postulaciones' => $user->can('convocatorias:gestionar') && $c->postulaciones()->exists(),
             'skills' => $c->skills->pluck('nombre')->values(),
             'skills_detalle' => $this->presentarSkills($c),
             'documentos' => $this->presentarDocumentos($c),
