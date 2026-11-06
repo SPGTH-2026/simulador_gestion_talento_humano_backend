@@ -9,7 +9,6 @@ use App\Models\Postulacion;
 use App\Models\PostulacionSkill;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
@@ -132,28 +131,6 @@ class PostulacionSkillController extends Controller
         return $this->guardarCertificado($request, $skill);
     }
 
-    /**
-     * Gestión documental del admin: sube o reemplaza el certificado de una skill
-     * de un aspirante, sin exigir ventana ni estado editable.
-     */
-    public function certificadoGestion(Request $request, Postulacion $postulacion, PostulacionSkill $skill): JsonResponse
-    {
-        $this->exigirRevision($request, $postulacion, true);
-        $this->exigirSkillDeLaPostulacion($postulacion, $skill);
-
-        $respuesta = $this->guardarCertificado($request, $skill);
-
-        Log::info('Gestión documental del administrador.', [
-            'accion' => 'certificado_reemplazado',
-            'actor_id' => $request->user()?->id,
-            'postulacion_id' => $postulacion->id,
-            'aspirante_id' => $postulacion->user_id,
-            'skill_id' => $skill->id,
-        ]);
-
-        return $respuesta;
-    }
-
     /** Quita el certificado de una skill (la skill se conserva). */
     public function quitarCertificado(Request $request, Postulacion $postulacion, PostulacionSkill $skill): JsonResponse
     {
@@ -162,25 +139,6 @@ class PostulacionSkillController extends Controller
         $this->exigirEditable($postulacion, 'skills');
 
         $this->limpiarCertificado($skill);
-
-        return response()->json(null, 204);
-    }
-
-    /** Gestión documental del admin: quita el certificado sin exigir ventana. */
-    public function quitarCertificadoGestion(Request $request, Postulacion $postulacion, PostulacionSkill $skill): JsonResponse
-    {
-        $this->exigirRevision($request, $postulacion, true);
-        $this->exigirSkillDeLaPostulacion($postulacion, $skill);
-
-        $this->limpiarCertificado($skill);
-
-        Log::info('Gestión documental del administrador.', [
-            'accion' => 'certificado_eliminado',
-            'actor_id' => $request->user()?->id,
-            'postulacion_id' => $postulacion->id,
-            'aspirante_id' => $postulacion->user_id,
-            'skill_id' => $skill->id,
-        ]);
 
         return response()->json(null, 204);
     }
