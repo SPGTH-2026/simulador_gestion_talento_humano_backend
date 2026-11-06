@@ -14,6 +14,7 @@ use App\Models\Postulacion;
 use App\Models\User;
 use App\Services\DocumentosDePostulacion;
 use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -374,12 +375,12 @@ class PostulacionController extends Controller
     }
 
     /**
-     * Violación del índice UNIQUE(convocatoria_id, user_id): SOLO el SQLSTATE
-     * 23000 con código de driver 1062 (MySQL). Cualquier otro error se relanza.
+     * Violación del índice UNIQUE(convocatoria_id, user_id). Laravel la clasifica
+     * igual en MySQL (1062) y en Postgres (23505). Cualquier otro error se relanza.
      */
     private function esDuplicado(QueryException $e): bool
     {
-        return $e->getCode() === '23000' && (int) ($e->errorInfo[1] ?? 0) === 1062;
+        return $e instanceof UniqueConstraintViolationException;
     }
 
     private function yaPostulado(): ValidationException
