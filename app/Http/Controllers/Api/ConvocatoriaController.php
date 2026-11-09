@@ -67,6 +67,9 @@ class ConvocatoriaController extends Controller
             'estado' => ['nullable', 'string'],
             'ficha_id' => ['nullable', 'integer', 'exists:fichas,id'],
             'q' => ['nullable', 'string', 'max:150'],
+            'tipo_convocatoria' => ['nullable', 'string', 'max:50'],
+            'modalidad' => ['nullable', 'string', 'max:50'],
+            'orden' => ['nullable', 'string', 'in:reciente,antigua,nombre,cierre'],
         ], $this->mensajes(), $this->atributos());
 
         if (($datos['estado'] ?? null) !== null && ! in_array($datos['estado'], ConvocatoriaEstado::codigos(), true)) {
@@ -109,12 +112,16 @@ class ConvocatoriaController extends Controller
         // gestión) solo se busca para quien está en la lista blanca.
         $this->aplicarBuscador($query, $datos['q'] ?? null, $this->veIdentificadorConvocatoria($user));
 
+        // Filtros por catálogo: el código se resuelve a id; uno inexistente no devuelve filas.
+        $this->filtrarPorParametro($query, 'tipo_convocatoria_id', 'tipo_convocatoria', $datos['tipo_convocatoria'] ?? null);
+        $this->filtrarPorParametro($query, 'modalidad_id', 'modalidad', $datos['modalidad'] ?? null);
+
         // Campos de postulación que le corresponden al usuario (sin N+1).
         $this->aplicarCamposDePostulacion($query, $user);
 
+        $this->aplicarOrden($query, $datos['orden'] ?? 'reciente');
+
         $listado = $query
-            ->orderByDesc('fecha_apertura')
-            ->orderByDesc('id')
             ->paginate($datos['per_page'] ?? 20, ['*'], 'page', $datos['page'] ?? 1);
 
         return response()->json([
@@ -139,6 +146,39 @@ class ConvocatoriaController extends Controller
      * 'convocatorias:gestionar': es un dato de gestión y el aspirante no lo
      * ve (tampoco lo recibe en la respuesta).
      */
+    /** Filtra por un parámetro de catálogo dado su código de tema y su código. */
+    private function filtrarPorParametro(Builder $query, string $columna, string $tema, ?string $codigo): void
+    {
+        if ($codigo === null || $codigo === '') {
+            return;
+        }
+
+        $parametro = Parametro::porTemaYCodigo($tema, $codigo);
+
+        if ($parametro === null) {
+            $query->whereRaw('1 = 0');
+
+            return;
+        }
+
+        $query->where($columna, $parametro->id);
+    }
+
+    /**
+     * Orden del listado. 'reciente' conserva el criterio original.
+     * Siempre desempata por id para que la paginación sea estable.
+     */
+    private function aplicarOrden(Builder $query, string $orden): void
+    {
+        match ($orden) {
+            'antigua' => $query->orderBy('fecha_apertura')->orderBy('id'),
+            'nombre' => $query->orderBy('nombre')->orderBy('id'),
+            // Las convocatorias sin fecha de cierre van al final.
+            'cierre' => $query->orderByRaw('fecha_cierre IS NULL')->orderBy('fecha_cierre')->orderBy('id'),
+            default => $query->orderByDesc('fecha_apertura')->orderByDesc('id'),
+        };
+    }
+
     private function aplicarBuscador(Builder $query, ?string $q, bool $buscaPorCodigo = true): void
     {
         $termino = trim((string) $q);
