@@ -12,7 +12,13 @@ use Laravel\Sanctum\Sanctum;
 
 class AppServiceProvider extends ServiceProvider
 {
-    public function register(): void {}
+    public function register(): void
+    {
+        // Memo de parámetros por petición: los catálogos (estados, tipos, etc.) casi
+        // no cambian, y el listado de convocatorias los resolvía con una consulta
+        // por cada llamada. "scoped" se reinicia en cada petición y en cada prueba.
+        $this->app->scoped('parametros.memo', fn () => new \ArrayObject());
+    }
 
     public function boot(): void
     {
