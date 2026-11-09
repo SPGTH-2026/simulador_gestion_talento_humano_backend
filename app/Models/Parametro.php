@@ -42,9 +42,18 @@ class Parametro extends Model
      */
     public static function porTemaYCodigo(string $codigoTema, string $codigoParametro): ?self
     {
-        return static::query()
-            ->whereHas('tema', fn (Builder $q) => $q->where('codigo', $codigoTema))
-            ->where('codigo', $codigoParametro)
-            ->first();
+        // Se memoriza durante la petición (ver AppServiceProvider): una sola consulta
+        // por tema+código aunque se pida varias veces.
+        $memo = app('parametros.memo');
+        $clave = $codigoTema.'.'.$codigoParametro;
+
+        if (! $memo->offsetExists($clave)) {
+            $memo[$clave] = static::query()
+                ->whereHas('tema', fn (Builder $q) => $q->where('codigo', $codigoTema))
+                ->where('codigo', $codigoParametro)
+                ->first();
+        }
+
+        return $memo[$clave];
     }
 }
