@@ -80,8 +80,8 @@ class ConvocatoriaEdicionBloqueadaTest extends TestCase
 
     /**
      * Documento EXTRA del catálogo: parámetro ACTIVO creado dentro de la prueba.
-     * No está en los obligatorios ni en los opcionales del gestor, así que se
-     * guarda con obligatorio = false.
+     * El alta ya lo guardaría como obligatorio; estas pruebas lo adjuntan a mano
+     * con obligatorio = false para simular convocatorias creadas antes de la regla.
      */
     private function documentoExtra(string $codigo = 'documento_adicional'): Parametro
     {
