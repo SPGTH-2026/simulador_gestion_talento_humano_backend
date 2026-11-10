@@ -207,6 +207,56 @@ class PostulacionDocumentoTest extends TestCase
         Storage::disk('local')->assertExists($documento->ruta);
     }
 
+    public function test_sube_un_documento_nuevo_sin_codigo_por_parametro_id(): void
+    {
+        [$aspirante, $postulacion] = $this->baseConDocumentos(['hoja_de_vida' => true]);
+
+        // Documento NUEVO del catálogo (sin código), como una especialización.
+        $temaId = (int) Parametro::porTemaYCodigo('tipo_documento', 'hoja_de_vida')->tema_id;
+        $nuevo = Parametro::create([
+            'tema_id' => $temaId,
+            'codigo' => null,
+            'nombre' => 'Especialización',
+            'orden' => 99,
+            'activo' => true,
+        ]);
+
+        $postulacion->convocatoria->documentos()->attach($nuevo->id, [
+            'obligatorio' => true,
+            'ponderacion' => 100,
+        ]);
+
+        $this->actingAs($aspirante)
+            ->withHeaders(['Accept' => 'application/json'])
+            ->post("/api/postulaciones/{$postulacion->id}/documentos", [
+                'parametro_id' => $nuevo->id,
+                'archivo' => $this->pdf('especializacion.pdf'),
+            ])
+            ->assertCreated();
+
+        $documento = PostulacionDocumento::sole();
+        $this->assertSame($nuevo->id, (int) $documento->parametro_id);
+        $this->assertSame('especializacion.pdf', $documento->nombre_original);
+        Storage::disk('local')->assertExists($documento->ruta);
+    }
+
+    public function test_parametro_id_que_no_es_de_la_convocatoria_devuelve_422(): void
+    {
+        [$aspirante, $postulacion] = $this->baseConDocumentos(['hoja_de_vida' => true]);
+
+        $ajeno = Parametro::porTemaYCodigo('tipo_documento', 'tarjeta_profesional');
+
+        $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
+            ->post("/api/postulaciones/{$postulacion->id}/documentos", [
+                'parametro_id' => $ajeno->id,
+                'archivo' => $this->pdf(),
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.parametro_id.0', 'Ese documento no hace parte de esta convocatoria.');
+
+        $this->assertDatabaseCount('postulacion_documentos', 0);
+    }
+
     public function test_reemplazar_el_mismo_tipo_actualiza_la_fila_y_borra_el_archivo_viejo(): void
     {
         [$aspirante, $postulacion] = $this->baseConDocumentos(['hoja_de_vida' => true]);
