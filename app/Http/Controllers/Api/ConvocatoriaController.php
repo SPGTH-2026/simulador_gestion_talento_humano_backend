@@ -982,33 +982,12 @@ class ConvocatoriaController extends Controller
     }
 
     /**
-     * Ids de los documentos opcionales que, si el gestor los incluye, se guardan
-     * como obligatorios (config/convocatorias.php: libreta_militar y
-     * tarjeta_profesional).
-     *
-     * @return array<int, int>
-     */
-    private function idsDocumentosOpcionalesObligatorios(): array
-    {
-        $ids = [];
-
-        foreach ((array) config('convocatorias.documentos_opcionales', []) as $codigo) {
-            $parametro = Parametro::porTemaYCodigo('tipo_documento', (string) $codigo);
-
-            if ($parametro && $parametro->activo) {
-                $ids[(int) $parametro->id] = true;
-            }
-        }
-
-        return array_keys($ids);
-    }
-
-    /**
-     * Combina los documentos elegidos por el gestor con los obligatorios y fija
-     * la obligatoriedad: true para los siempre obligatorios y para los
-     * opcionales que la regla marca como obligatorios cuando se incluyen
-     * (libreta_militar y tarjeta_profesional). Los obligatorios van primero y
-     * siempre, aunque el gestor no los haya enviado. Sin duplicados.
+     * Combina los documentos elegidos por el gestor con los siempre
+     * obligatorios (config/convocatorias.php). TODO documento que el gestor
+     * incluya queda obligatorio: si se le puede asignar un porcentaje, debe
+     * pesar en la evaluación y exigirse al aspirante. Los obligatorios fijos
+     * van primero y siempre, aunque el gestor no los haya enviado. Sin
+     * duplicados.
      *
      * La ponderación enviada por el gestor se conserva; los obligatorios que el
      * backend agrega por su cuenta quedan sin ponderación (null) y se validan
@@ -1020,7 +999,6 @@ class ConvocatoriaController extends Controller
     private function conDocumentosObligatorios(?array $documentos): array
     {
         $obligatorios = array_fill_keys($this->idsDocumentosObligatorios(), true);
-        $opcionalesObligatorios = array_fill_keys($this->idsDocumentosOpcionalesObligatorios(), true);
 
         $final = [];
 
@@ -1029,8 +1007,9 @@ class ConvocatoriaController extends Controller
             $final[$id] = ['id' => $id, 'obligatorio' => true, 'ponderacion' => null];
         }
 
-        // 2) Los elegidos por el gestor (sin repetir los obligatorios). Si el
-        //    gestor envió ponderación para un obligatorio, se conserva.
+        // 2) Los elegidos por el gestor (sin repetir los obligatorios). TODO
+        //    documento incluido queda obligatorio: un documento nuevo del
+        //    catálogo con porcentaje debe contar en el 60 % y exigirse.
         foreach ($documentos ?? [] as $documento) {
             $id = (int) $documento['id'];
             $ponderacion = $documento['ponderacion'] ?? null;
@@ -1043,7 +1022,7 @@ class ConvocatoriaController extends Controller
 
             $final[$id] = [
                 'id' => $id,
-                'obligatorio' => isset($opcionalesObligatorios[$id]),
+                'obligatorio' => true,
                 'ponderacion' => $ponderacion,
             ];
         }
@@ -1504,9 +1483,8 @@ class ConvocatoriaController extends Controller
             'id' => $d->id,
             'codigo' => $d->codigo,
             'nombre' => $d->nombre,
-            // Obligatoriedad real guardada: true para los siempre obligatorios
-            // (config/convocatorias.php) y para los opcionales que el gestor
-            // incluyó como obligatorios.
+            // Obligatoriedad real guardada: todo documento incluido en la
+            // convocatoria queda obligatorio y pesa en la evaluación.
             'obligatorio' => (bool) $d->pivot->obligatorio,
             // Peso (%) de este documento en la evaluación de esta convocatoria.
             // null = sin configurar (reparto equitativo en la evaluación).
