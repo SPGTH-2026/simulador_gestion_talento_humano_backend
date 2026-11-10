@@ -2,14 +2,20 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\PostulacionEstado;
 use App\Enums\Role;
 use App\Http\Controllers\Controller;
 use App\Models\Convocatoria;
 use App\Models\Evaluacion;
 use App\Models\Ficha;
+use App\Models\Parametro;
+use App\Models\PerfilAspirante;
 use App\Models\Postulacion;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
@@ -21,6 +27,13 @@ use Illuminate\Validation\Rule;
  */
 class EvaluacionController extends Controller
 {
+    /**
+     * Umbral único de habilitación documental. Vive en el servidor para que la
+     * interfaz y Selección no calculen valores distintos. Cambiarlo aquí (o
+     * volverlo configurable por convocatoria) es una decisión de negocio.
+     */
+    private const UMBRAL_SELECCION = 60;
+
     public function index(Request $request): JsonResponse
     {
         $datos = $request->validate([
@@ -34,6 +47,7 @@ class EvaluacionController extends Controller
         $query = Postulacion::query()
             ->with([
                 'user:id,name,email,ficha_id',
+                'user.perfilAspirante.sexo',
                 'convocatoria:id,nombre,cargo,estado_id,ficha_id,fecha_evaluacion',
                 'convocatoria.estado:id,codigo,nombre',
                 'convocatoria.documentos',
@@ -41,6 +55,7 @@ class EvaluacionController extends Controller
                 'documentos',
                 'skills',
             ])
+            ->whereHas('estado', fn ($q) => $q->where('codigo', PostulacionEstado::Postulada->value))
             ->whereHas('convocatoria', fn ($q) => $q->whereIn('ficha_id', $actor->fichaIds()));
 
         if ($datos['convocatoria_id'] ?? null) {
@@ -63,15 +78,25 @@ class EvaluacionController extends Controller
 
         $pagina = $query->orderBy('id')->paginate(20);
 
-        $mias = Evaluacion::query()
-            ->where('evaluador_id', $actor->id)
-            ->whereIn('postulacion_id', $pagina->getCollection()->pluck('id'))
+        $postIds = $pagina->getCollection()->pluck('id');
+
+        // El evaluador ve SU propia evaluación. El instructor/super_admin ve lo
+        // que realizaron los evaluadores (cualquier evaluación de la postulación,
+        // priorizando la más relevante/reciente) para ir mirando el proceso.
+        $evaluaciones = Evaluacion::query()
+            ->with('evaluador:id,name,email,subrole')
+            ->whereIn('postulacion_id', $postIds)
+            ->when(
+                ! in_array($actor->role, [Role::Instructor, Role::SuperAdmin], true),
+                fn ($q) => $q->where('evaluador_id', $actor->id)
+            )
             ->get()
-            ->keyBy('postulacion_id');
+            ->groupBy('postulacion_id')
+            ->map(fn ($grupo) => $this->seleccionarEvaluacionVisible($grupo));
 
         return response()->json([
             'data' => $pagina->getCollection()->map(
-                fn (Postulacion $p) => $this->presentar($p, $mias->get($p->id)),
+                fn (Postulacion $p) => $this->presentar($p, $evaluaciones->get($p->id), $actor)
             ),
             'meta' => [
                 'current_page' => $pagina->currentPage(),
@@ -97,6 +122,7 @@ class EvaluacionController extends Controller
 
         $postulacion->load([
             'user:id,name,email,ficha_id',
+            'user.perfilAspirante.sexo',
             'convocatoria:id,nombre,cargo,estado_id,ficha_id,fecha_evaluacion',
             'convocatoria.estado:id,codigo,nombre',
             'convocatoria.documentos',
@@ -105,21 +131,52 @@ class EvaluacionController extends Controller
             'skills',
         ]);
 
-        $evaluacion = Evaluacion::query()
-            ->where('postulacion_id', $postulacion->id)
-            ->where('evaluador_id', $request->user()->id)
-            ->first();
+        $actor = $request->user();
+        $queryEval = Evaluacion::query()
+            ->with('evaluador:id,name,email,subrole')
+            ->where('postulacion_id', $postulacion->id);
 
-        return response()->json(['data' => $this->presentar($postulacion, $evaluacion)]);
+        if (! in_array($actor->role, [Role::Instructor, Role::SuperAdmin], true)) {
+            $queryEval->where('evaluador_id', $actor->id);
+            $evaluacion = $queryEval->first();
+        } else {
+            $evaluacion = $this->seleccionarEvaluacionVisible($queryEval->get());
+        }
+
+        return response()->json(['data' => $this->presentar($postulacion, $evaluacion, $actor)]);
+    }
+
+    /**
+     * El Instructor/super_admin administra el proceso: cuando una postulación
+     * tiene varias evaluaciones (una por cada evaluador de la ficha), trabaja
+     * sobre la más representativa: primero la finalizada, luego la que quedó en
+     * corrección y por último el borrador; desempatando por la más reciente.
+     *
+     * @param  Collection<int, Evaluacion>  $evaluaciones
+     */
+    private function seleccionarEvaluacionVisible($evaluaciones): ?Evaluacion
+    {
+        return $evaluaciones
+            ->sortByDesc(fn (Evaluacion $e) => [
+                match ($e->estado) {
+                    'finalizada' => 3,
+                    'correccion_solicitada' => 2,
+                    default => 1,
+                },
+                $e->updated_at?->getTimestamp() ?? 0,
+                $e->id,
+            ])
+            ->first();
     }
 
     public function upsert(Request $request, Postulacion $postulacion): JsonResponse
     {
         $this->autorizar($request, $postulacion);
+        $this->exigirPostulada($postulacion);
 
         $datos = $request->validate([
             'observaciones' => ['nullable', 'string', 'max:2000'],
-            'estado' => ['nullable', Rule::in(['en_proceso', 'finalizada'])],
+            'estado' => ['nullable', Rule::in(['en_proceso', 'correccion_solicitada', 'finalizada'])],
             'criterios' => ['required', 'array', 'min:1'],
             'criterios.*.criterio' => ['required', 'string', 'max:120'],
             'criterios.*.puntaje' => ['required', 'numeric', 'min:0', 'max:100'],
@@ -128,23 +185,61 @@ class EvaluacionController extends Controller
             'cumplimiento' => ['nullable', 'integer', 'min:0', 'max:100'],
         ]);
 
-        $evaluacion = DB::transaction(function () use ($request, $postulacion, $datos) {
-            $evaluacion = Evaluacion::firstOrNew([
-                'postulacion_id' => $postulacion->id,
-                'evaluador_id' => $request->user()->id,
-            ]);
+        // Si el evaluador manda a corregir, debe indicar qué documento(s) no
+        // cumplen (marcados con No = false) y explicar el motivo en observaciones.
+        if (($datos['estado'] ?? null) === 'correccion_solicitada') {
+            if (trim((string) ($datos['observaciones'] ?? '')) === '') {
+                abort(422, 'Debes escribir en las observaciones qué documentos o datos debe corregir el aspirante.');
+            }
+
+            $perfil = (array) ($datos['perfil'] ?? []);
+            $hayRechazado = collect($perfil)->contains(fn ($valor) => $valor === false);
+
+            if (! $hayRechazado) {
+                abort(422, 'Marca con "No" al menos un documento que el aspirante deba corregir.');
+            }
+        }
+
+        // El cumplimiento se calcula en el SERVIDOR con la ponderación que el
+        // gestor configuró para ESTA convocatoria: el cliente solo manda qué
+        // documentos cumplió (perfil). Si no hay documentos obligatorios
+        // aplicables no existe base para decidir el 60 %: se rechaza en vez de
+        // confiar en el porcentaje que envíe el navegador.
+        $calculado = $this->calcularCumplimiento($postulacion, $datos['perfil'] ?? null);
+
+        if ($calculado === null) {
+            abort(422, 'No se puede evaluar: la convocatoria no tiene documentos obligatorios aplicables con ponderación válida.');
+        }
+
+        $evaluacion = DB::transaction(function () use ($request, $postulacion, $datos, $calculado) {
+            $actor = $request->user();
+
+            // El Instructor/super_admin administra el proceso: si ya existe una
+            // evaluación de un aprendiz evaluador, la edita; si no existe, crea
+            // la suya. El evaluador siempre guarda la suya.
+            if (in_array($actor->role, [Role::Instructor, Role::SuperAdmin], true)) {
+                $existente = $this->seleccionarEvaluacionVisible(
+                    Evaluacion::where('postulacion_id', $postulacion->id)->get()
+                );
+                $evaluacion = $existente ?? new Evaluacion([
+                    'postulacion_id' => $postulacion->id,
+                    'evaluador_id' => $actor->id,
+                ]);
+            } else {
+                $evaluacion = Evaluacion::firstOrNew([
+                    'postulacion_id' => $postulacion->id,
+                    'evaluador_id' => $actor->id,
+                ]);
+            }
+
             $evaluacion->observaciones = $datos['observaciones'] ?? null;
             $evaluacion->estado = $datos['estado'] ?? 'en_proceso';
             $evaluacion->perfil = $datos['perfil'] ?? null;
-
-            // El cumplimiento se calcula en el SERVIDOR con la ponderación que
-            // el gestor configuró para ESTA convocatoria: el cliente solo manda
-            // qué documentos cumplió (perfil). Si la convocatoria no tiene
-            // documentos, se respeta el valor enviado (compatibilidad).
-            $calculado = $this->calcularCumplimiento($postulacion, $datos['perfil'] ?? null);
-            $evaluacion->cumplimiento = $calculado ?? ($datos['cumplimiento'] ?? null);
-            $evaluacion->pasa_seleccion = ($evaluacion->cumplimiento !== null)
-                ? $evaluacion->cumplimiento >= 60
+            $evaluacion->cumplimiento = $calculado;
+            // Solo una evaluación finalizada es resultado: un borrador no define si
+            // la postulación pasa a selección.
+            $evaluacion->pasa_seleccion = ($evaluacion->estado === 'finalizada' && $evaluacion->cumplimiento !== null)
+                ? $evaluacion->cumplimiento >= self::UMBRAL_SELECCION
                 : null;
 
             $evaluacion->save();
@@ -173,6 +268,7 @@ class EvaluacionController extends Controller
 
         $postulacion->load([
             'user:id,name,email,ficha_id',
+            'user.perfilAspirante.sexo',
             'convocatoria:id,nombre,cargo,estado_id,ficha_id,fecha_evaluacion',
             'convocatoria.estado:id,codigo,nombre',
             'convocatoria.documentos',
@@ -183,14 +279,22 @@ class EvaluacionController extends Controller
             'documentos',
         ]);
 
-        return response()->json(['data' => $this->presentar($postulacion, $evaluacion->load('detalles'))]);
+        return response()->json([
+            'data' => $this->presentar($postulacion, $evaluacion->load('detalles'), $request->user()),
+        ]);
     }
 
     public function misEvaluaciones(Request $request): JsonResponse
     {
         $actor = $request->user();
 
-        $query = Evaluacion::query()->with(['detalles', 'postulacion.convocatoria:id,nombre,cargo,estado_id', 'postulacion.user:id,name,email']);
+        $query = Evaluacion::query()->with([
+            'detalles',
+            'evaluador:id,name,email',
+            'postulacion.convocatoria:id,nombre,cargo,estado_id',
+            'postulacion.user:id,name,email',
+            'postulacion.documentos',
+        ]);
 
         // El aspirante ve las evaluaciones sobre SUS postulaciones. El instructor
         // y el admin ven TODAS las evaluaciones calificadas de su alcance.
@@ -217,6 +321,8 @@ class EvaluacionController extends Controller
                 'cumplimiento' => $e->cumplimiento,
                 'pasa_seleccion' => $e->pasa_seleccion,
                 'fecha' => $e->created_at?->toDateString(),
+                'perfil' => $e->perfil,
+                'documentos_actualizados' => $this->documentosActualizados($e->postulacion, $e),
                 'aspirante' => [
                     'id' => $e->postulacion->user?->id,
                     'name' => $e->postulacion->user?->name,
@@ -225,6 +331,11 @@ class EvaluacionController extends Controller
                 'convocatoria' => [
                     'id' => $e->postulacion->convocatoria?->id,
                     'titulo' => $e->postulacion->convocatoria?->nombre,
+                ],
+                'evaluador' => [
+                    'id' => $e->evaluador?->id,
+                    'name' => $e->evaluador?->name,
+                    'email' => $e->evaluador?->email,
                 ],
                 'criterios' => $e->detalles->map(fn ($d) => [
                     'criterio' => $d->criterio,
@@ -244,17 +355,55 @@ class EvaluacionController extends Controller
     }
 
     /**
-     * Pesos (%) de los documentos de la convocatoria, indexados por id del
-     * parámetro (tipo_documento). Si la convocatoria no configuró ponderaciones
-     * (todas null) se reparte el 100 % en partes iguales, que es el
-     * comportamiento histórico. Si solo algunas están configuradas (no debería
-     * pasar: el alta lo valida), el resto se reparte con lo que sobra.
+     * Solo las postulaciones enviadas (postulada) se evalúan. Un borrador es un
+     * formulario incompleto que el aspirante aún no confirmó, y una retirada ya
+     * no participa del proceso. La validación vive en el servidor: la interfaz
+     * solo es un reflejo de esta regla.
+     */
+    private function exigirPostulada(Postulacion $postulacion): void
+    {
+        $postulacion->loadMissing('estado');
+
+        if ($postulacion->estado?->codigo !== PostulacionEstado::Postulada->value) {
+            abort(422, 'Solo se pueden evaluar postulaciones enviadas. Esta postulación no ha sido enviada o fue retirada.');
+        }
+    }
+
+    /**
+     * Pesos (%) de los documentos OBLIGATORIOS y APLICABLES de la convocatoria,
+     * indexados por id del parámetro (tipo_documento). Si la convocatoria no
+     * configuró ponderaciones (todas null) se reparte el 100 % en partes
+     * iguales, que es el comportamiento histórico. Si solo algunas están
+     * configuradas (no debería pasar: el alta lo valida), el resto se reparte
+     * con lo que sobra.
      *
      * @return array<int, float>
      */
     private function pesosDocumentos(Postulacion $postulacion): array
     {
         $documentos = $postulacion->convocatoria?->documentos ?? collect();
+
+        if ($documentos->isEmpty()) {
+            return [];
+        }
+
+        // Solo cuentan los documentos OBLIGATORIOS y APLICABLES, con la misma
+        // regla que usa el envío (DocumentosDePostulacion): un documento
+        // opcional no debe restar, y la libreta militar de una mujer no aplica.
+        $perfil = PerfilAspirante::query()
+            ->where('user_id', $postulacion->user_id)
+            ->with('sexo')
+            ->first();
+
+        $sexoMujer = $perfil?->sexo?->codigo === 'mujer';
+
+        $documentos = $documentos->filter(function (Parametro $documento) use ($sexoMujer) {
+            if (! (bool) $documento->pivot->obligatorio) {
+                return false;
+            }
+
+            return ! ($documento->codigo === Parametro::DOC_LIBRETA_MILITAR && $sexoMujer);
+        });
 
         if ($documentos->isEmpty()) {
             return [];
@@ -294,8 +443,8 @@ class EvaluacionController extends Controller
      * Cumplimiento ponderado (0-100) a partir de lo marcado por el evaluador.
      *
      * El `perfil` llega como { "doc-{parametro_id}": true|false } desde la
-     * pantalla de evaluación. Se suma el peso de cada documento marcado como
-     * cumplido sobre el total de pesos configurados.
+     * pantalla de evaluación. Se suma el peso de cada documento OBLIGATORIO y
+     * APLICABLE marcado como cumplido sobre el total de pesos configurados.
      */
     private function calcularCumplimiento(Postulacion $postulacion, ?array $perfil): ?int
     {
@@ -321,10 +470,22 @@ class EvaluacionController extends Controller
         return (int) round(min(100.0, ($obtenido / $total) * 100));
     }
 
-    private function presentar(Postulacion $p, ?Evaluacion $e): array
+    private function presentar(Postulacion $p, ?Evaluacion $e, ?User $actor = null): array
     {
-        $docsSubidos = $p->documentos->count();
-        $docsRequeridos = $p->convocatoria?->documentos?->count() ?? 0;
+        // Solo cuentan los documentos OBLIGATORIOS y APLICABLES que el
+        // aspirante ya cargó (misma regla que el cálculo del 60 %). No existe
+        // un estado de validación en la base: "cargado" es lo único que se
+        // puede afirmar. La libreta militar de una mujer no aplica.
+        $sexoMujer = $p->user?->perfilAspirante?->sexo?->codigo === 'mujer';
+
+        $requeridos = ($p->convocatoria?->documentos ?? collect())
+            ->filter(fn (Parametro $d) => (bool) $d->pivot->obligatorio
+                && ! ($d->codigo === Parametro::DOC_LIBRETA_MILITAR && $sexoMujer));
+
+        $docsRequeridos = $requeridos->count();
+        $docsCargados = $p->documentos
+            ->whereIn('parametro_id', $requeridos->pluck('id'))
+            ->count();
 
         return [
             'id' => $p->id,
@@ -341,7 +502,7 @@ class EvaluacionController extends Controller
             ],
             'documentos' => [
                 'total' => $docsRequeridos,
-                'validados' => $docsSubidos,
+                'cargados' => $docsCargados,
             ],
             'skills' => $p->convocatoria?->skills?->map(function ($cs) use ($p) {
                 $declarada = $p->skills->firstWhere('convocatoria_skill_id', $cs->id);
@@ -355,6 +516,9 @@ class EvaluacionController extends Controller
             })->values() ?? [],
             'evaluacion' => $e ? [
                 'id' => $e->id,
+                'evaluador_id' => $e->evaluador_id,
+                'evaluador' => $e->evaluador?->name ?? $e->evaluador?->email,
+                'es_propia' => $actor !== null && (int) $e->evaluador_id === (int) $actor->id,
                 'puntaje_total' => $e->puntaje_total,
                 'estado' => $e->estado,
                 'observaciones' => $e->observaciones,
@@ -362,6 +526,7 @@ class EvaluacionController extends Controller
                 'pasa_seleccion' => $e->pasa_seleccion,
                 'fecha' => $e->created_at?->toDateString(),
                 'perfil' => $e->perfil,
+                'documentos_actualizados' => $this->documentosActualizados($p, $e),
                 'criterios' => $e->relationLoaded('detalles')
                     ? $e->detalles->map(fn ($d) => [
                         'criterio' => $d->criterio,
@@ -371,5 +536,27 @@ class EvaluacionController extends Controller
                     : [],
             ] : null,
         ];
+    }
+
+    /**
+     * Identificadores "doc-{parametro_id}" de los documentos requeridos cuyo
+     * archivo se subió o reemplazó DESPUÉS de la última revisión del evaluador.
+     *
+     * @return array<int, string>
+     */
+    private function documentosActualizados(?Postulacion $p, ?Evaluacion $e): array
+    {
+        if (! $p || ! $e || ! $e->updated_at) {
+            return [];
+        }
+
+        $evalUpdated = Carbon::parse($e->updated_at);
+
+        return $p->documentos
+            ->whereNotNull('parametro_id')
+            ->filter(fn ($doc) => $doc->updated_at && Carbon::parse($doc->updated_at)->gt($evalUpdated))
+            ->map(fn ($doc) => 'doc-'.$doc->parametro_id)
+            ->values()
+            ->all();
     }
 }
