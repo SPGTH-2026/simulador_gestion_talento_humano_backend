@@ -6,6 +6,7 @@ use App\Enums\Role;
 use App\Models\Convocatoria;
 use App\Models\Ficha;
 use App\Models\Parametro;
+use App\Models\ParametroTema;
 use App\Models\User;
 use Database\Seeders\ParametroSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -796,6 +797,48 @@ class ConvocatoriaGestionTest extends TestCase
             ],
             $this->codigosDocumentos($respuesta->json('data.documentos')),
         );
+    }
+
+    public function test_documento_nuevo_del_catalogo_queda_obligatorio_y_conserva_su_porcentaje(): void
+    {
+        $instructor = $this->instructor($this->ficha());
+
+        // Documento nuevo del catálogo (sin código), como una especialización.
+        $tema = ParametroTema::where('codigo', 'tipo_documento')->firstOrFail();
+        $nuevo = Parametro::create([
+            'tema_id' => $tema->id,
+            'codigo' => null,
+            'nombre' => 'Especialización en SST',
+            'orden' => 99,
+            'activo' => true,
+        ]);
+
+        // Los 4 fijos + el nuevo, con porcentajes que suman 100 %.
+        $respuesta = $this->actingAs($instructor)->postJson('/api/convocatorias', [
+            'nombre' => 'Con documento nuevo',
+            'documentos' => [
+                ['codigo' => 'hoja_de_vida', 'ponderacion' => 20],
+                ['codigo' => 'documento_identidad', 'ponderacion' => 20],
+                ['codigo' => 'certificados_academicos', 'ponderacion' => 20],
+                ['codigo' => 'certificados_laborales', 'ponderacion' => 20],
+                ['id' => $nuevo->id, 'ponderacion' => 20],
+            ],
+        ])->assertCreated();
+
+        $documentos = collect($respuesta->json('data.documentos'))->keyBy('id');
+
+        // El documento nuevo cuenta como obligatorio, igual que los fijos.
+        $this->assertTrue($documentos[$nuevo->id]['obligatorio']);
+        $this->assertEquals(20.0, (float) $documentos[$nuevo->id]['ponderacion']);
+
+        $pivote = Convocatoria::find($respuesta->json('data.id'))
+            ->documentos()
+            ->where('parametros.id', $nuevo->id)
+            ->firstOrFail()
+            ->pivot;
+
+        $this->assertTrue((bool) $pivote->obligatorio);
+        $this->assertEquals(20.0, (float) $pivote->ponderacion);
     }
 
     public function test_edicion_no_puede_quitar_los_obligatorios(): void

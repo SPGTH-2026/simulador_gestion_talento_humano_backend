@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\Concerns\IdentificadorConvocatoria;
 use App\Http\Controllers\Controller;
 use App\Models\Convocatoria;
 use App\Models\ConvocatoriaSkill;
+use App\Models\Evaluacion;
 use App\Models\Parametro;
 use App\Models\PerfilAspirante;
 use App\Models\Postulacion;
@@ -112,15 +113,26 @@ class PostulacionDocumentoController extends Controller
     private function guardarRequerido(Request $request, Postulacion $postulacion): JsonResponse
     {
         $datos = $request->validate([
-            'codigo' => ['required', 'string'],
+            'codigo' => ['nullable', 'string', 'required_without:parametro_id'],
+            'parametro_id' => ['nullable', 'integer', 'required_without:codigo'],
             'archivo' => $this->reglasArchivo(),
         ], $this->mensajes(), $this->atributos());
 
-        $parametro = Parametro::porTemaYCodigo('tipo_documento', $datos['codigo']);
+        // Un documento del catálogo puede identificarse por código (documentos
+        // de sistema) o por id (documentos NUEVOS creados por el gestor, que
+        // nacen sin código). Se resuelve por código solo si vino.
+        $campo = empty($datos['parametro_id']) ? 'codigo' : 'parametro_id';
+
+        $parametro = empty($datos['parametro_id'])
+            ? Parametro::porTemaYCodigo('tipo_documento', $datos['codigo'])
+            : Parametro::query()
+                ->whereKey($datos['parametro_id'])
+                ->whereHas('tema', fn ($q) => $q->where('codigo', 'tipo_documento'))
+                ->first();
 
         if (! $parametro || ! $this->convocatoriaPide($postulacion, $parametro->id)) {
             throw ValidationException::withMessages([
-                'codigo' => 'Ese documento no hace parte de esta convocatoria.',
+                $campo => 'Ese documento no hace parte de esta convocatoria.',
             ]);
         }
 
@@ -151,6 +163,8 @@ class PostulacionDocumentoController extends Controller
             ]);
             $codigoHttp = 201;
         }
+
+        $this->invalidarEvaluacionesPorCambioDocumental($postulacion, $documento);
 
         return response()->json(['data' => $this->archivoResumen($documento)], $codigoHttp);
     }
@@ -228,8 +242,45 @@ class PostulacionDocumentoController extends Controller
     {
         $disco = $documento->disco;
         $ruta = $documento->ruta;
+        $esRequerido = ! $documento->esAdicional();
+        $postulacion = $esRequerido ? $documento->postulacion : null;
+
         $documento->delete();
         $this->borrarArchivo($disco, $ruta);
+
+        if ($esRequerido && $postulacion) {
+            $this->invalidarEvaluacionesPorCambioDocumental($postulacion);
+        }
+    }
+
+    /**
+     * Si se reemplaza o elimina un documento requerido después de una
+     * evaluación, las evaluaciones finalizadas vuelven a 'en_proceso' para que
+     * Selección no use un resultado calculado sobre archivos antiguos.
+     */
+    private function invalidarEvaluacionesPorCambioDocumental(Postulacion $postulacion, ?PostulacionDocumento $documento = null): void
+    {
+        $evaluaciones = Evaluacion::query()
+            ->where('postulacion_id', $postulacion->id)
+            ->get();
+
+        foreach ($evaluaciones as $evaluacion) {
+            $evalUpdated = $evaluacion->updated_at ? \Illuminate\Support\Carbon::parse($evaluacion->updated_at) : null;
+            $docUpdated = $documento?->updated_at ? \Illuminate\Support\Carbon::parse($documento->updated_at) : null;
+
+            $evaluacion->timestamps = false;
+
+            if ($evaluacion->estado === 'finalizada') {
+                $evaluacion->estado = 'en_proceso';
+                $evaluacion->pasa_seleccion = null;
+            }
+
+            if ($evalUpdated && $docUpdated && $evalUpdated->gte($docUpdated)) {
+                $evaluacion->updated_at = $docUpdated->copy()->subSecond();
+            }
+
+            $evaluacion->save();
+        }
     }
 
     // ── Reglas de acceso ───────────────────────────────────────────────
@@ -454,6 +505,7 @@ class PostulacionDocumentoController extends Controller
             'string' => 'El campo :attribute debe ser texto.',
             'max' => 'El campo :attribute no debe superar :max caracteres.',
             'codigo.required' => 'El tipo de documento es obligatorio.',
+            'parametro_id.required' => 'El tipo de documento es obligatorio.',
             'titulo.required' => 'El título del documento adicional es obligatorio.',
             'archivo.required' => 'El archivo es obligatorio.',
             'archivo.file' => 'El archivo no es válido.',
@@ -467,6 +519,7 @@ class PostulacionDocumentoController extends Controller
     {
         return [
             'codigo' => 'tipo de documento',
+            'parametro_id' => 'tipo de documento',
             'titulo' => 'título',
             'nota' => 'nota',
             'archivo' => 'archivo',
