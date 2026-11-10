@@ -175,6 +175,74 @@ class EvaluacionTest extends TestCase
             ->assertJsonPath('data.evaluacion.es_propia', true);
     }
 
+    public function test_el_super_admin_ve_la_evaluacion_del_aprendiz_evaluador(): void
+    {
+        $ficha = $this->ficha('2896411');
+        $superAdmin = $this->usuario(Role::SuperAdmin);
+        $evaluador = $this->usuario(Role::Aprendiz, 'evaluador', ['ficha_id' => $ficha->id]);
+        $postulacion = $this->postulacion($this->convocatoria($ficha));
+
+        $evaluacion = Evaluacion::create([
+            'postulacion_id' => $postulacion->id,
+            'evaluador_id' => $evaluador->id,
+            'puntaje_total' => 80,
+            'estado' => 'finalizada',
+        ]);
+
+        // El super admin ve el trabajo de los evaluadores en el listado y en
+        // "Mis evaluaciones", sin pertenecer a la ficha del aspirante.
+        $this->actingAs($superAdmin)->getJson('/api/evaluaciones')
+            ->assertOk()
+            ->assertJsonPath('data.0.evaluacion.id', $evaluacion->id)
+            ->assertJsonPath('data.0.evaluacion.evaluador_id', $evaluador->id);
+
+        $this->actingAs($superAdmin)->getJson('/api/mis-evaluaciones')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $evaluacion->id)
+            ->assertJsonPath('data.0.evaluador.id', $evaluador->id);
+    }
+
+    public function test_la_evaluacion_del_evaluador_prevalece_sobre_la_del_admin(): void
+    {
+        $ficha = $this->ficha('2896411');
+        $instructor = $this->usuario(Role::Instructor, null, ['ficha_id' => $ficha->id]);
+        $superAdmin = $this->usuario(Role::SuperAdmin);
+        $evaluador = $this->usuario(Role::Aprendiz, 'evaluador', ['ficha_id' => $ficha->id]);
+        $postulacion = $this->postulacion($this->convocatoria($ficha, $instructor));
+
+        // El admin ya tenía una evaluación finalizada...
+        Evaluacion::create([
+            'postulacion_id' => $postulacion->id,
+            'evaluador_id' => $instructor->id,
+            'puntaje_total' => 100,
+            'estado' => 'finalizada',
+        ]);
+
+        // ...pero el evaluador tiene un borrador más reciente. El admin y el
+        // super admin deben ver el trabajo del evaluador, no la evaluación
+        // propia del admin.
+        $delEvaluador = Evaluacion::create([
+            'postulacion_id' => $postulacion->id,
+            'evaluador_id' => $evaluador->id,
+            'puntaje_total' => 50,
+            'estado' => 'en_proceso',
+        ]);
+
+        $this->actingAs($instructor)->getJson('/api/evaluaciones')
+            ->assertOk()
+            ->assertJsonPath('data.0.evaluacion.id', $delEvaluador->id)
+            ->assertJsonPath('data.0.evaluacion.evaluador_id', $evaluador->id);
+
+        $this->actingAs($instructor)->getJson("/api/evaluaciones/{$postulacion->id}")
+            ->assertOk()
+            ->assertJsonPath('data.evaluacion.id', $delEvaluador->id);
+
+        $this->actingAs($superAdmin)->getJson('/api/evaluaciones')
+            ->assertOk()
+            ->assertJsonPath('data.0.evaluacion.id', $delEvaluador->id)
+            ->assertJsonPath('data.0.evaluacion.evaluador_id', $evaluador->id);
+    }
+
     public function test_el_instructor_edita_la_evaluacion_del_aprendiz_sin_duplicarla(): void
     {
         $ficha = $this->ficha('2896411');

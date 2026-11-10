@@ -148,9 +148,10 @@ class EvaluacionController extends Controller
 
     /**
      * El Instructor/super_admin administra el proceso: cuando una postulación
-     * tiene varias evaluaciones (una por cada evaluador de la ficha), trabaja
-     * sobre la más representativa: primero la finalizada, luego la que quedó en
-     * corrección y por último el borrador; desempatando por la más reciente.
+     * tiene varias evaluaciones, trabaja sobre la más representativa. Primero
+     * prioriza la que realizó un aprendiz con subrol evaluador (es el trabajo
+     * que el admin/super_admin supervisa); luego el estado (finalizada, en
+     * corrección, borrador) y por último la más reciente.
      *
      * @param  Collection<int, Evaluacion>  $evaluaciones
      */
@@ -158,6 +159,7 @@ class EvaluacionController extends Controller
     {
         return $evaluaciones
             ->sortByDesc(fn (Evaluacion $e) => [
+                $e->evaluador?->subrole === 'evaluador' ? 1 : 0,
                 match ($e->estado) {
                     'finalizada' => 3,
                     'correccion_solicitada' => 2,
