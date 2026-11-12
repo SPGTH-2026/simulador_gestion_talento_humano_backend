@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\ConfiguracionSeleccionController;
 use App\Http\Controllers\Api\ConvocatoriaController;
 use App\Http\Controllers\Api\EvaluacionController;
 use App\Http\Controllers\Api\FichaController;
@@ -10,6 +11,8 @@ use App\Http\Controllers\Api\PortafolioController;
 use App\Http\Controllers\Api\PostulacionController;
 use App\Http\Controllers\Api\PostulacionDocumentoController;
 use App\Http\Controllers\Api\PostulacionSkillController;
+use App\Http\Controllers\Api\ReferenciaDocumentalController;
+use App\Http\Controllers\Api\SeleccionController;
 use App\Http\Controllers\Api\SocialAuthController;
 use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
@@ -192,6 +195,33 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
     Route::put('evaluaciones/{postulacion}', [EvaluacionController::class, 'upsert'])->middleware('can:evaluacion:evaluar');
 
     Route::get('mis-evaluaciones', [EvaluacionController::class, 'misEvaluaciones'])->middleware('can:propio:evaluaciones');
+
+    // ── Módulo de Selección y Preselección (etapa 1, solo lectura) ─────
+    // Fuera del alcance de fichas del actor, la convocatoria responde 404.
+    Route::get('seleccion/convocatorias', [SeleccionController::class, 'convocatorias'])
+        ->middleware('can:seleccion:ver');
+    Route::get('seleccion/convocatorias/{convocatoria}/candidatos', [SeleccionController::class, 'candidatos'])
+        ->whereNumber('convocatoria')
+        ->missing(fn () => abort(404, 'Convocatoria no encontrada.'))
+        ->middleware('can:seleccion:ver');
+
+    // Etapa 3: configuración de entrevista y prueba técnica por convocatoria. La
+    // escritura sigue la matriz de Selección (seleccion:decidir), sin restringir el rol.
+    Route::get('seleccion/convocatorias/{convocatoria}/configuracion', [ConfiguracionSeleccionController::class, 'show'])
+        ->whereNumber('convocatoria')
+        ->middleware('can:seleccion:ver');
+    Route::put('seleccion/convocatorias/{convocatoria}/configuracion', [ConfiguracionSeleccionController::class, 'update'])
+        ->whereNumber('convocatoria')
+        ->middleware('can:seleccion:decidir');
+
+    // Etapa 2: evaluación documental de referencia. Decide solo Instructor o
+    // Superadministrador (el rol se exige en el controlador, además del permiso).
+    Route::get('seleccion/convocatorias/{convocatoria}/candidatos/{postulacion}/referencia-documental', [ReferenciaDocumentalController::class, 'show'])
+        ->whereNumber(['convocatoria', 'postulacion'])
+        ->middleware('can:seleccion:decidir');
+    Route::post('seleccion/convocatorias/{convocatoria}/candidatos/{postulacion}/referencia-documental', [ReferenciaDocumentalController::class, 'store'])
+        ->whereNumber(['convocatoria', 'postulacion'])
+        ->middleware('can:seleccion:decidir');
 });
 
 // ── Ejemplo: cada ruta de negocio declara el permiso que exige (403 si el rol no lo tiene) ──
