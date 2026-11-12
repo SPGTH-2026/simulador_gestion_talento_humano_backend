@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Enums\ConvocatoriaEstado;
 use App\Enums\PostulacionEstado;
+use App\Http\Controllers\Api\Concerns\ResultadoAdicional;
 use App\Http\Controllers\Api\Concerns\ResultadosDocumentales;
 use App\Http\Controllers\Controller;
 use App\Models\Convocatoria;
@@ -33,6 +34,7 @@ use Illuminate\Validation\ValidationException;
  */
 class CalificacionSeleccionController extends Controller
 {
+    use ResultadoAdicional;
     use ResultadosDocumentales;
 
     public function show(Request $request, int $convocatoria, int $postulacion): JsonResponse
@@ -185,19 +187,6 @@ class CalificacionSeleccionController extends Controller
         throw ValidationException::withMessages([$campo => $mensaje]);
     }
 
-    /** "8.5" o "10" a centésimas enteras (850, 1000). Solo recibe textos ya validados. */
-    private function centesimas(string $nota): int
-    {
-        [$entera, $decimales] = array_pad(explode('.', $nota, 2), 2, '0');
-
-        return ((int) $entera * 100) + (int) str_pad($decimales, 2, '0');
-    }
-
-    private function formatear(int $centesimas): string
-    {
-        return sprintf('%d.%02d', intdiv($centesimas, 100), $centesimas % 100);
-    }
-
     private function presentar(Convocatoria $convocatoria, Postulacion $postulacion): array
     {
         $postulacion->loadMissing('user:id,name');
@@ -214,7 +203,7 @@ class CalificacionSeleccionController extends Controller
         $actividades = [];
         $requeridas = [];
         $pendientes = [];
-        $sumaPonderada = 0;
+        $notasCentesimas = [];
 
         foreach (SeleccionCalificacion::ACTIVIDADES as $actividad) {
             $activa = $configuracion?->{$actividad.'_activa'} ?? false;
@@ -227,9 +216,10 @@ class CalificacionSeleccionController extends Controller
                 $requeridas[] = $actividad;
                 if ($nota === null) {
                     $pendientes[] = $actividad;
-                } else {
-                    $sumaPonderada += $this->centesimas((string) $nota->nota) * $peso;
                 }
+            }
+            if ($nota !== null) {
+                $notasCentesimas[$actividad] = $this->centesimas((string) $nota->nota);
             }
 
             $actividades[$actividad] = [
@@ -287,7 +277,7 @@ class CalificacionSeleccionController extends Controller
             'resultado_adicional' => [
                 'estado' => $estadoResultado,
                 // Promedio ponderado en centésimas, mitad hacia arriba. null si no está completo.
-                'valor' => $estadoResultado === 'completo' ? $this->formatear(intdiv($sumaPonderada + 50, 100)) : null,
+                'valor' => $estadoResultado === 'completo' ? $this->formatear($this->resultadoPonderado($configuracion, $notasCentesimas)) : null,
             ],
         ];
     }

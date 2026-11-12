@@ -69,6 +69,44 @@ trait ResultadosDocumentales
     }
 
     /**
+     * Estado documental de varias postulaciones con la misma regla, en 3 consultas
+     * sin importar cuántas sean. Devuelve, por id, el estado, el cumplimiento a
+     * mostrar y los datos de la referencia (id y vigencia) para detectar cambios.
+     *
+     * @param  Collection<int, int>  $postulacionIds
+     * @return Collection<int, array{estado: string, cumplimiento: ?int, ref_id: ?int, vigente: bool}>
+     */
+    protected function estadosDocumentales(Collection $postulacionIds): Collection
+    {
+        $resultados = $this->soloElegibles(Evaluacion::query()->whereIn('postulacion_id', $postulacionIds))
+            ->selectRaw('postulacion_id, COUNT(*) AS total, SUM(CASE WHEN pasa_seleccion THEN 1 ELSE 0 END) AS habilitadas, MAX(cumplimiento) AS cumplimiento')
+            ->groupBy('postulacion_id')
+            ->get()
+            ->keyBy('postulacion_id');
+        $referencias = $this->ultimasReferencias($postulacionIds);
+
+        return $postulacionIds->mapWithKeys(function (int $id) use ($resultados, $referencias) {
+            $r = $resultados->get($id);
+            $ref = $referencias->get($id);
+            $total = (int) ($r->total ?? 0);
+            [$estado, $cumplimiento] = $this->clasificarEstadoDocumental(
+                $total,
+                (int) ($r->habilitadas ?? 0),
+                $total === 1 ? (int) $r->cumplimiento : null,
+                $ref['ref'] ?? null,
+                $ref['vigente'] ?? false,
+            );
+
+            return [$id => [
+                'estado' => $estado,
+                'cumplimiento' => $cumplimiento,
+                'ref_id' => $ref['ref']->id ?? null,
+                'vigente' => $ref['vigente'] ?? false,
+            ]];
+        });
+    }
+
+    /**
      * Estado documental actual de UNA postulación, con la misma regla del listado
      * de candidatos y de la referencia (no recalcula el cumplimiento).
      *

@@ -6,12 +6,14 @@ use App\Http\Controllers\Api\ConfiguracionSeleccionController;
 use App\Http\Controllers\Api\ConvocatoriaController;
 use App\Http\Controllers\Api\EvaluacionController;
 use App\Http\Controllers\Api\FichaController;
+use App\Http\Controllers\Api\FinalistasSeleccionController;
 use App\Http\Controllers\Api\ParametroController;
 use App\Http\Controllers\Api\PerfilAspiranteController;
 use App\Http\Controllers\Api\PortafolioController;
 use App\Http\Controllers\Api\PostulacionController;
 use App\Http\Controllers\Api\PostulacionDocumentoController;
 use App\Http\Controllers\Api\PostulacionSkillController;
+use App\Http\Controllers\Api\RankingSeleccionController;
 use App\Http\Controllers\Api\ReferenciaDocumentalController;
 use App\Http\Controllers\Api\SeleccionController;
 use App\Http\Controllers\Api\SocialAuthController;
@@ -232,6 +234,21 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
     Route::put('seleccion/convocatorias/{convocatoria}/candidatos/{postulacion}/calificaciones/{actividad}', [CalificacionSeleccionController::class, 'update'])
         ->whereNumber(['convocatoria', 'postulacion'])
         ->whereIn('actividad', ['entrevista', 'prueba_tecnica'])
+        ->middleware('can:seleccion:decidir');
+
+    // Etapa 5: ranking de candidatos listos y finalistas. Consultar pide seleccion:ver;
+    // fijar el objetivo y confirmar la lista, seleccion:decidir.
+    Route::get('seleccion/convocatorias/{convocatoria}/ranking', [RankingSeleccionController::class, 'show'])
+        ->whereNumber('convocatoria')
+        ->middleware('can:seleccion:ver');
+    Route::put('seleccion/convocatorias/{convocatoria}/ranking/objetivo', [RankingSeleccionController::class, 'objetivo'])
+        ->whereNumber('convocatoria')
+        ->middleware('can:seleccion:decidir');
+    Route::get('seleccion/convocatorias/{convocatoria}/finalistas', [FinalistasSeleccionController::class, 'index'])
+        ->whereNumber('convocatoria')
+        ->middleware('can:seleccion:ver');
+    Route::post('seleccion/convocatorias/{convocatoria}/finalistas', [FinalistasSeleccionController::class, 'store'])
+        ->whereNumber('convocatoria')
         ->middleware('can:seleccion:decidir');
 });
 
