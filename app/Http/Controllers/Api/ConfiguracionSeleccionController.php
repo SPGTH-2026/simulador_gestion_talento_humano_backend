@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\Concerns\ResultadosDocumentales;
 use App\Http\Controllers\Controller;
 use App\Models\Convocatoria;
 use App\Models\Parametro;
+use App\Models\SeleccionCalificacion;
 use App\Models\SeleccionConfiguracion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -70,6 +71,24 @@ class ConfiguracionSeleccionController extends Controller
             if (! $fila || ! $this->admiteConfiguracion($fila)) {
                 throw ValidationException::withMessages([
                     'convocatoria' => 'La configuración solo se puede guardar con la convocatoria publicada o en proceso.',
+                ]);
+            }
+
+            $existente = SeleccionConfiguracion::query()->where('convocatoria_id', $fila->id)->first();
+
+            // Reenviar exactamente lo guardado no reescribe nada (ni siquiera con notas registradas).
+            if ($existente !== null
+                && $existente->entrevista_activa === $entrevista
+                && $existente->prueba_tecnica_activa === $prueba
+                && $existente->peso_entrevista === $pesoEntrevista
+                && $existente->peso_prueba_tecnica === $pesoPrueba) {
+                return $existente;
+            }
+
+            // Con la primera nota de cualquier candidato, la configuración queda congelada.
+            if (SeleccionCalificacion::query()->where('convocatoria_id', $fila->id)->exists()) {
+                throw ValidationException::withMessages([
+                    'convocatoria' => 'La configuración ya no se puede cambiar: la convocatoria tiene calificaciones registradas.',
                 ]);
             }
 
@@ -148,12 +167,16 @@ class ConfiguracionSeleccionController extends Controller
     {
         $entrevista = $configuracion?->entrevista_activa ?? false;
         $prueba = $configuracion?->prueba_tecnica_activa ?? false;
+        // Se calcula una sola vez: true con la primera nota de cualquier candidato.
+        $bloqueada = SeleccionCalificacion::query()->where('convocatoria_id', $convocatoria->id)->exists();
 
         return [
             'convocatoria_id' => $convocatoria->id,
             'estado_convocatoria' => $convocatoria->estado()->value('codigo'),
-            'editable' => $this->admiteConfiguracion($convocatoria),
+            // Editable = el estado lo admite y no hay notas; `bloqueada` explica por qué no lo es.
+            'editable' => $this->admiteConfiguracion($convocatoria) && ! $bloqueada,
             'configurada' => $configuracion !== null,
+            'bloqueada' => $bloqueada,
             // null = pendiente de configurar; sin_actividades = elegido de forma explícita.
             'opcion' => $configuracion === null ? null : match (true) {
                 $entrevista && $prueba => 'ambas',

@@ -68,6 +68,29 @@ trait ResultadosDocumentales
         ]);
     }
 
+    /**
+     * Estado documental actual de UNA postulación, con la misma regla del listado
+     * de candidatos y de la referencia (no recalcula el cumplimiento).
+     *
+     * @return array{0: string, 1: ?int} estado y cumplimiento a mostrar
+     */
+    protected function estadoDocumentalDe(int $postulacionId): array
+    {
+        $resultado = $this->soloElegibles(Evaluacion::query()->where('postulacion_id', $postulacionId))
+            ->selectRaw('COUNT(*) AS total, SUM(CASE WHEN pasa_seleccion THEN 1 ELSE 0 END) AS habilitadas, MAX(cumplimiento) AS cumplimiento')
+            ->first();
+        $referencia = $this->ultimasReferencias(collect([$postulacionId]))->get($postulacionId);
+        $total = (int) $resultado->total;
+
+        return $this->clasificarEstadoDocumental(
+            $total,
+            (int) $resultado->habilitadas,
+            $total === 1 ? (int) $resultado->cumplimiento : null,
+            $referencia['ref'] ?? null,
+            $referencia['vigente'] ?? false,
+        );
+    }
+
     protected function referenciaVigente(ReferenciaDocumental $ref, ?Evaluacion $evaluacion): bool
     {
         return $evaluacion !== null

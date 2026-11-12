@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CalificacionSeleccionController;
 use App\Http\Controllers\Api\ConfiguracionSeleccionController;
 use App\Http\Controllers\Api\ConvocatoriaController;
 use App\Http\Controllers\Api\EvaluacionController;
@@ -221,6 +222,16 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
         ->middleware('can:seleccion:decidir');
     Route::post('seleccion/convocatorias/{convocatoria}/candidatos/{postulacion}/referencia-documental', [ReferenciaDocumentalController::class, 'store'])
         ->whereNumber(['convocatoria', 'postulacion'])
+        ->middleware('can:seleccion:decidir');
+
+    // Etapa 4: calificaciones presenciales. Consultar pide seleccion:ver; registrar o corregir,
+    // seleccion:decidir. Las reglas de estado y habilitación se validan en el controlador.
+    Route::get('seleccion/convocatorias/{convocatoria}/candidatos/{postulacion}/calificaciones', [CalificacionSeleccionController::class, 'show'])
+        ->whereNumber(['convocatoria', 'postulacion'])
+        ->middleware('can:seleccion:ver');
+    Route::put('seleccion/convocatorias/{convocatoria}/candidatos/{postulacion}/calificaciones/{actividad}', [CalificacionSeleccionController::class, 'update'])
+        ->whereNumber(['convocatoria', 'postulacion'])
+        ->whereIn('actividad', ['entrevista', 'prueba_tecnica'])
         ->middleware('can:seleccion:decidir');
 });
 
