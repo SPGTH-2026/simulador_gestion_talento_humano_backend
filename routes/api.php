@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CalificacionSeleccionController;
 use App\Http\Controllers\Api\ConfiguracionSeleccionController;
 use App\Http\Controllers\Api\ConvocatoriaController;
+use App\Http\Controllers\Api\DecisionSeleccionController;
 use App\Http\Controllers\Api\EvaluacionController;
 use App\Http\Controllers\Api\FichaController;
 use App\Http\Controllers\Api\FinalistasSeleccionController;
@@ -250,6 +251,17 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
     Route::post('seleccion/convocatorias/{convocatoria}/finalistas', [FinalistasSeleccionController::class, 'store'])
         ->whereNumber('convocatoria')
         ->middleware('can:seleccion:decidir');
+
+    // Etapa 6: decisiones internas, cupos e historial. Consultar pide seleccion:ver; decidir o rectificar, seleccion:decidir.
+    Route::get('seleccion/convocatorias/{convocatoria}/decisiones', [DecisionSeleccionController::class, 'index'])
+        ->whereNumber('convocatoria')
+        ->middleware('can:seleccion:ver');
+    Route::put('seleccion/convocatorias/{convocatoria}/decisiones/{postulacion}', [DecisionSeleccionController::class, 'update'])
+        ->whereNumber(['convocatoria', 'postulacion'])
+        ->middleware('can:seleccion:decidir');
+    Route::get('seleccion/convocatorias/{convocatoria}/decisiones/{postulacion}/historial', [DecisionSeleccionController::class, 'historial'])
+        ->whereNumber(['convocatoria', 'postulacion'])
+        ->middleware('can:seleccion:ver');
 });
 
 // ── Ejemplo: cada ruta de negocio declara el permiso que exige (403 si el rol no lo tiene) ──
