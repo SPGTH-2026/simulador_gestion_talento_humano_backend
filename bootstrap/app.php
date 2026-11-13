@@ -17,6 +17,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // Sesión + cookies para peticiones que vengan del front (lista SANCTUM_STATEFUL_DOMAINS).
         $middleware->statefulApi();
         $middleware->trustProxies(at: '*');
+        // Server-Timing: solo agrega la cabecera si SERVER_TIMING=true.
+        $middleware->append(\App\Http\Middleware\ServerTiming::class);
 
         $middleware->alias([
             'verified' => EnsureEmailIsVerified::class,

@@ -4,6 +4,9 @@ return [
 
     'frontend_url' => env('FRONTEND_URL', 'http://localhost:5173'),
 
+    // Cabecera Server-Timing (tiempo de app, BD y número de consultas). Apagada por defecto.
+    'server_timing' => (bool) env('SERVER_TIMING', false),
+
     /*
     |--------------------------------------------------------------------------
     | Application Name
