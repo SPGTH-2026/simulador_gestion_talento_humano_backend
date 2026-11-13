@@ -13,6 +13,7 @@ use App\Models\Postulacion;
 use App\Models\SeleccionDecision;
 use App\Models\SeleccionDecisionEvento;
 use App\Models\SeleccionFinalistaLista;
+use App\Models\SeleccionFinalistaMiembro;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -53,16 +54,25 @@ class DecisionSeleccionController extends Controller
         $convocatoria = $this->convocatoriaEnAlcance($request->user(), $convocatoria);
 
         $lista = $this->ultimaLista($convocatoria->id);
-        $revisar = collect();
-        if ($lista !== null) {
-            $revisar = collect($this->revisionDeLista($lista, $this->construirRanking($convocatoria)))->keyBy('postulacion_id');
-        }
 
         $decisiones = SeleccionDecision::query()
             ->with(['decididor:id,name', 'postulacion.user:id,name'])
             ->where('convocatoria_id', $convocatoria->id)
             ->get()
             ->keyBy('postulacion_id');
+
+        // El Ranking vivo se calcula UNA vez: sirve para detectar la revisión de la lista y para decir cómo está hoy cada
+        // fila. Solo hace falta si hay lista o alguna decisión que explicar.
+        $ranking = ($lista !== null || $decisiones->isNotEmpty()) ? $this->construirRanking($convocatoria) : null;
+        $revisar = $lista === null
+            ? collect()
+            : collect($this->revisionDeLista($lista, $ranking))->keyBy('postulacion_id');
+        $sustentos = $this->sustentosDeDecisiones($convocatoria, $decisiones);
+        // Indexado una sola vez: así cada fila se resuelve sin recorrer la colección.
+        $indice = $ranking === null ? null : [
+            'candidatos' => $ranking['candidatos']->keyBy('id'),
+            'listos' => $ranking['listos']->keyBy('id'),
+        ];
 
         // Finalistas de la lista vigente + decisiones existentes aunque su candidato ya no esté en ella.
         $filas = collect();
@@ -72,15 +82,21 @@ class DecisionSeleccionController extends Controller
                 'aspirante' => $m->postulacion?->user?->name,
                 'posicion' => $m->posicion,
                 'en_lista' => true,
+                // Lo que conservó la lista vigente al confirmarse: solo posición y resultado (el desglose no se congela).
+                'confirmada' => [
+                    'lista_version' => $lista->version,
+                    'posicion' => $m->posicion,
+                    'resultado' => $m->resultado === null ? null : (string) $m->resultado,
+                ],
             ]);
         }
         foreach ($decisiones as $id => $d) {
             if (! $filas->has($id)) {
-                $filas->put($id, ['postulacion_id' => $id, 'aspirante' => $d->postulacion?->user?->name, 'posicion' => null, 'en_lista' => false]);
+                $filas->put($id, ['postulacion_id' => $id, 'aspirante' => $d->postulacion?->user?->name, 'posicion' => null, 'en_lista' => false, 'confirmada' => null]);
             }
         }
 
-        $filas = $filas->map(function (array $fila) use ($decisiones, $revisar) {
+        $filas = $filas->map(function (array $fila) use ($decisiones, $revisar, $indice, $sustentos) {
             $d = $decisiones->get($fila['postulacion_id']);
             // Con decisión, se avisa si el candidato ya no está en la lista vigente o esta cambió.
             $motivoRevision = $d === null ? null : (! $fila['en_lista'] ? 'fuera_de_lista' : ($revisar->get($fila['postulacion_id'])['motivo'] ?? null));
@@ -90,6 +106,10 @@ class DecisionSeleccionController extends Controller
                 'decision' => $d === null ? null : $this->presentarDecision($d),
                 'requiere_revision' => $motivoRevision !== null,
                 'motivo_revision' => $motivoRevision,
+                // Cómo está hoy según el Ranking vivo (es otra cosa que lo confirmado: puede haber cambiado).
+                'actual' => $this->situacionActual($indice, $fila['postulacion_id']),
+                // Lo que sustentó la decisión: la fila de la versión de lista registrada en ella, si existe.
+                'sustento' => $d === null ? null : $sustentos[$fila['postulacion_id']],
             ];
         })->sortBy(fn (array $f) => sprintf('%05d-%010d', $f['posicion'] ?? 99999, $f['postulacion_id']))->values();
 
@@ -111,6 +131,9 @@ class DecisionSeleccionController extends Controller
                     'version' => $lista->version,
                     'total' => $lista->miembros->count(),
                     'requiere_revision' => $revisar->isNotEmpty(),
+                    'modo' => $lista->modo,
+                    'confirmada_por' => $lista->confirmador?->name,
+                    'confirmada_en' => $lista->created_at?->toIso8601String(),
                 ],
             ],
         ]);
@@ -273,10 +296,76 @@ class DecisionSeleccionController extends Controller
         return $lista->version;
     }
 
+    /**
+     * Situación de un candidato según el Ranking vivo, o null si ya no es candidato (su postulación dejó de estar
+     * postulada). 'posicion' y 'resultado' solo existen si está listo y hay actividades configuradas.
+     *
+     * @return array{listo: bool, posicion: ?int, resultado: ?string, estado_documental: string, cumplimiento_documental: mixed}|null
+     */
+    private function situacionActual(?array $indice, int $postulacionId): ?array
+    {
+        $candidato = $indice['candidatos'][$postulacionId] ?? null;
+        if ($candidato === null) {
+            return null;
+        }
+        $listo = $indice['listos'][$postulacionId] ?? null;
+
+        return [
+            'listo' => $candidato['listo'],
+            'posicion' => $listo['posicion'] ?? null,
+            'resultado' => $candidato['resultado'] === null ? null : $this->formatear($candidato['resultado']),
+            'estado_documental' => $candidato['estado_documental'],
+            'cumplimiento_documental' => $candidato['cumplimiento_documental'],
+        ];
+    }
+
+    /**
+     * Para cada decisión, la fila de la lista cuya versión quedó registrada en ella (posición y resultado de entonces).
+     * Se resuelve en bloque (dos consultas para toda la página, sin consultas por fila). La versión registrada puede no
+     * contener al candidato —al liberar un cupo se registra la versión vigente aunque ya no lo incluya—: en ese caso
+     * 'pertenece' es false y no hay posición ni resultado que mostrar.
+     *
+     * @param  \Illuminate\Support\Collection<int, SeleccionDecision>  $decisiones  indexadas por postulacion_id
+     * @return array<int, array{lista_version: ?int, confirmada_en: ?string, pertenece: bool, posicion: ?int, resultado: ?string}>
+     */
+    private function sustentosDeDecisiones(Convocatoria $convocatoria, $decisiones): array
+    {
+        if ($decisiones->isEmpty()) {
+            return [];
+        }
+
+        $versiones = $decisiones->pluck('lista_version')->filter()->unique()->values();
+        $listas = SeleccionFinalistaLista::query()
+            ->where('convocatoria_id', $convocatoria->id)
+            ->whereIn('version', $versiones)
+            ->get(['id', 'version', 'created_at'])
+            ->keyBy('version');
+        $miembros = $listas->isEmpty() ? collect() : SeleccionFinalistaMiembro::query()
+            ->whereIn('lista_id', $listas->pluck('id'))
+            ->whereIn('postulacion_id', $decisiones->keys())
+            ->get(['lista_id', 'postulacion_id', 'posicion', 'resultado'])
+            ->keyBy(fn (SeleccionFinalistaMiembro $m) => $m->lista_id.'|'.$m->postulacion_id);
+
+        $sustentos = [];
+        foreach ($decisiones as $postulacionId => $d) {
+            $lista = $d->lista_version === null ? null : $listas->get($d->lista_version);
+            $miembro = $lista === null ? null : $miembros->get($lista->id.'|'.$postulacionId);
+            $sustentos[$postulacionId] = [
+                'lista_version' => $d->lista_version,
+                'confirmada_en' => $lista?->created_at?->toIso8601String(),
+                'pertenece' => $miembro !== null,
+                'posicion' => $miembro?->posicion,
+                'resultado' => $miembro?->resultado === null ? null : (string) $miembro->resultado,
+            ];
+        }
+
+        return $sustentos;
+    }
+
     private function ultimaLista(int $convocatoriaId): ?SeleccionFinalistaLista
     {
         return SeleccionFinalistaLista::query()
-            ->with('miembros.postulacion.user:id,name')
+            ->with(['miembros.postulacion.user:id,name', 'confirmador:id,name'])
             ->where('convocatoria_id', $convocatoriaId)
             ->orderByDesc('version')
             ->first();
