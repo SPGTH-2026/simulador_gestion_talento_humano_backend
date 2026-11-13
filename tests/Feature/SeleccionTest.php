@@ -176,7 +176,7 @@ class SeleccionTest extends TestCase
         $fila = collect($respuesta->json('data'))->firstWhere('id', $publicada->id);
         $this->assertSame(3, $fila['vacantes']);
         $this->assertSame('publicada', $fila['estado']['codigo']);
-        $this->assertSame(['id', 'codigo', 'nombre', 'cargo', 'estado', 'vacantes'], array_keys($fila));
+        $this->assertSame(['id', 'codigo', 'nombre', 'cargo', 'estado', 'vacantes', 'candidatos'], array_keys($fila));
         $this->assertArrayNotHasKey('ficha_id', $fila);
     }
 
