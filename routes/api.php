@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CalificacionSeleccionController;
+use App\Http\Controllers\Api\ComparacionSeleccionController;
 use App\Http\Controllers\Api\ConfiguracionSeleccionController;
 use App\Http\Controllers\Api\ConvocatoriaController;
 use App\Http\Controllers\Api\DecisionSeleccionController;
@@ -261,6 +262,12 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
         ->middleware('can:seleccion:decidir');
     Route::get('seleccion/convocatorias/{convocatoria}/decisiones/{postulacion}/historial', [DecisionSeleccionController::class, 'historial'])
         ->whereNumber(['convocatoria', 'postulacion'])
+        ->middleware('can:seleccion:ver');
+
+    // CU-SEL-017: comparar de 2 a 5 candidatos de una convocatoria (solo lectura). Pide seleccion:ver; el evaluador y la
+    // referencia documental solo se envían a Instructor y Superadministrador.
+    Route::get('seleccion/convocatorias/{convocatoria}/comparacion', [ComparacionSeleccionController::class, 'show'])
+        ->whereNumber('convocatoria')
         ->middleware('can:seleccion:ver');
 });
 
