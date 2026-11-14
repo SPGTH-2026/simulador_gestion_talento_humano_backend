@@ -29,6 +29,8 @@ class Evaluacion extends Model
             'perfil' => 'array',
             'cumplimiento' => 'integer',
             'pasa_seleccion' => 'boolean',
+            // Sube con cada cambio real y con cada invalidación documental; no está en $fillable: solo la mueve el servidor.
+            'revision' => 'integer',
         ];
     }
 

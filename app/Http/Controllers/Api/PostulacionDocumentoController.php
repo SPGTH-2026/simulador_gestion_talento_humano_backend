@@ -16,6 +16,7 @@ use App\Models\User;
 use App\Services\DocumentosDePostulacion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -85,6 +86,7 @@ class PostulacionDocumentoController extends Controller
         $this->exigirPropia($request, $postulacion);
         $this->exigirDocumentoDeLaPostulacion($postulacion, $documento);
         $this->exigirEditable($postulacion, 'documentos');
+        $this->exigirQueNoSeaObligatorio($postulacion, $documento);
 
         $this->eliminarDocumento($documento);
 
@@ -260,27 +262,38 @@ class PostulacionDocumentoController extends Controller
      */
     private function invalidarEvaluacionesPorCambioDocumental(Postulacion $postulacion, ?PostulacionDocumento $documento = null): void
     {
-        $evaluaciones = Evaluacion::query()
-            ->where('postulacion_id', $postulacion->id)
-            ->get();
+        // Cada evaluación que pierde su resultado suma una revisión (de forma atómica, con las filas bloqueadas): así una
+        // referencia que la tenía elegida deja de ser vigente aunque la evaluación se rehaga en el mismo segundo.
+        DB::transaction(function () use ($postulacion, $documento) {
+            $evaluaciones = Evaluacion::query()
+                ->where('postulacion_id', $postulacion->id)
+                ->lockForUpdate()
+                ->get();
 
-        foreach ($evaluaciones as $evaluacion) {
-            $evalUpdated = $evaluacion->updated_at ? \Illuminate\Support\Carbon::parse($evaluacion->updated_at) : null;
-            $docUpdated = $documento?->updated_at ? \Illuminate\Support\Carbon::parse($documento->updated_at) : null;
+            foreach ($evaluaciones as $evaluacion) {
+                $evalUpdated = $evaluacion->updated_at ? \Illuminate\Support\Carbon::parse($evaluacion->updated_at) : null;
+                $docUpdated = $documento?->updated_at ? \Illuminate\Support\Carbon::parse($documento->updated_at) : null;
 
-            $evaluacion->timestamps = false;
+                $evaluacion->timestamps = false;
+                $invalidada = false;
 
-            if ($evaluacion->estado === 'finalizada') {
-                $evaluacion->estado = 'en_proceso';
-                $evaluacion->pasa_seleccion = null;
+                if ($evaluacion->estado === 'finalizada') {
+                    $evaluacion->estado = 'en_proceso';
+                    $evaluacion->pasa_seleccion = null;
+                    $invalidada = true;
+                }
+
+                if ($evalUpdated && $docUpdated && $evalUpdated->gte($docUpdated)) {
+                    $evaluacion->updated_at = $docUpdated->copy()->subSecond();
+                }
+
+                $evaluacion->save();
+
+                if ($invalidada) {
+                    DB::table('evaluaciones')->where('id', $evaluacion->id)->increment('revision');
+                }
             }
-
-            if ($evalUpdated && $docUpdated && $evalUpdated->gte($docUpdated)) {
-                $evaluacion->updated_at = $docUpdated->copy()->subSecond();
-            }
-
-            $evaluacion->save();
-        }
+        });
     }
 
     // ── Reglas de acceso ───────────────────────────────────────────────
@@ -289,6 +302,28 @@ class PostulacionDocumentoController extends Controller
     {
         if ($documento->postulacion_id !== $postulacion->id) {
             abort(404, 'Documento no encontrado.');
+        }
+    }
+
+    /**
+     * Regla acordada el 4 de noviembre de 2026 (RF-DOC-006): un documento OBLIGATORIO de la convocatoria, una vez cargado,
+     * no se elimina; solo se reemplaza por otro archivo válido (RF-DOC-005). Así una postulación enviada no puede perder
+     * un obligatorio. Los adicionales y los documentos opcionales del catálogo sí se pueden eliminar.
+     */
+    private function exigirQueNoSeaObligatorio(Postulacion $postulacion, PostulacionDocumento $documento): void
+    {
+        if ($documento->esAdicional()) {
+            return;
+        }
+
+        $postulacion->loadMissing('convocatoria.documentos');
+        $requerido = $postulacion->convocatoria->documentos
+            ->first(fn (Parametro $d) => $d->id === $documento->parametro_id);
+
+        if ($requerido !== null && (bool) $requerido->pivot->obligatorio) {
+            throw ValidationException::withMessages([
+                'documento' => 'Este documento es obligatorio y no se puede eliminar: reemplázalo por otro archivo.',
+            ]);
         }
     }
 
