@@ -94,6 +94,8 @@ class ReferenciaDocumentalController extends Controller
                 'cumplimiento' => $evaluacion->cumplimiento,
                 'pasa_seleccion' => $evaluacion->pasa_seleccion,
                 'evaluacion_actualizada_en' => $evaluacion->updated_at,
+                // La vigencia se mide por revisión (la evaluación está bloqueada en esta transacción: no cambia a media).
+                'evaluacion_revision' => $evaluacion->revision,
             ]);
         });
 

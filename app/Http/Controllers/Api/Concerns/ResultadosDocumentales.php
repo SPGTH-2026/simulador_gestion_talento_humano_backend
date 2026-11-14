@@ -39,10 +39,11 @@ trait ResultadosDocumentales
      * para todo el conjunto de postulaciones, sin importar cuántas sean.
      *
      * Vigente = la evaluación elegida existe, sigue elegible y conserva el
-     * mismo cumplimiento, resultado y updated_at que tenía al designarla.
-     * No basta con updated_at: la invalidación por cambio documental pasa la
-     * evaluación a en_proceso con los timestamps desactivados, y eso se detecta
-     * por el estado. Una reedición normal cambia updated_at.
+     * mismo cumplimiento, resultado y REVISIÓN que tenía al designarla. La
+     * revisión sube con cada cambio real de la evaluación y con cada
+     * invalidación por cambio documental, así que no depende del reloj: dos
+     * cambios en el mismo segundo no se confunden, ni una reevaluación en el
+     * segundo de la designación reactiva una referencia invalidada.
      *
      * @param  Collection<int, int>  $postulacionIds
      * @return Collection<int, array{ref: ReferenciaDocumental, vigente: bool}> indexada por postulacion_id
@@ -59,7 +60,7 @@ trait ResultadosDocumentales
 
         $evaluaciones = Evaluacion::query()
             ->whereIn('id', $ultimas->pluck('evaluacion_id')->filter()->values())
-            ->get(['id', 'estado', 'cumplimiento', 'pasa_seleccion', 'updated_at'])
+            ->get(['id', 'estado', 'cumplimiento', 'pasa_seleccion', 'revision'])
             ->keyBy('id');
 
         return $ultimas->map(fn (ReferenciaDocumental $ref) => [
@@ -136,7 +137,7 @@ trait ResultadosDocumentales
             && $evaluacion->pasa_seleccion !== null
             && $evaluacion->cumplimiento === $ref->cumplimiento
             && $evaluacion->pasa_seleccion === $ref->pasa_seleccion
-            && $evaluacion->updated_at?->getTimestamp() === $ref->evaluacion_actualizada_en?->getTimestamp();
+            && $evaluacion->revision === $ref->evaluacion_revision;
     }
 
     /**

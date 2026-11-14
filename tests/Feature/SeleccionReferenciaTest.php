@@ -373,8 +373,11 @@ class SeleccionReferenciaTest extends TestCase
         $this->designar($instructor, $convocatoria, $postulacion, $a)->assertCreated();
 
         // Mismo resultado, pero editada después: no se asume que sigue siendo lo que se revisó.
+        // (Aquí el cambio se hace sobre el modelo; en el servidor cada cambio real de la evaluación suma una revisión, que
+        // es lo que mide la vigencia. El comportamiento por la API está en EvaluacionReenvioReferenciaTest.)
         $this->travel(5)->minutes();
         $a->update(['observaciones' => 'Ajuste posterior']);
+        $a->increment('revision');
         $this->assertSame('requiere_revision', $this->fila($instructor, $convocatoria, $postulacion)['estado_documental']);
 
         // Cambia el cumplimiento y vuelve a finalizar.
@@ -382,6 +385,7 @@ class SeleccionReferenciaTest extends TestCase
         $this->assertSame('habilitado', $this->fila($instructor, $convocatoria, $postulacion)['estado_documental']);
         $this->travel(5)->minutes();
         $a->update(['cumplimiento' => 55, 'pasa_seleccion' => false]);
+        $a->increment('revision');
         $fila = $this->fila($instructor, $convocatoria, $postulacion);
         $this->assertSame(['requiere_revision', null], [$fila['estado_documental'], $fila['cumplimiento']]);
     }

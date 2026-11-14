@@ -2,9 +2,11 @@
 
 namespace App\Services;
 
+use App\Models\Convocatoria;
 use App\Models\Parametro;
 use App\Models\PerfilAspirante;
 use App\Models\Postulacion;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 
 /**
@@ -63,6 +65,44 @@ class DocumentosDePostulacion
 
         $resultado = [];
         foreach ($postulaciones as $postulacion) {
+            $resultado[$postulacion->id] = $this->faltantesCon($postulacion, $perfiles->get($postulacion->user_id)) === [];
+        }
+
+        return $resultado;
+    }
+
+    /**
+     * Mismo cálculo y MISMA regla que completosPara (faltantesCon), para las postulaciones de UNA convocatoria ya
+     * cargada: es lo que usa el Ranking para exigir los obligatorios aplicables. Siempre las mismas consultas, sin
+     * importar cuántas postulaciones haya: los archivos subidos de todas, los documentos de la convocatoria (una vez) y,
+     * solo si la convocatoria exige la libreta militar, los perfiles para saber a quién no le aplica.
+     *
+     * @param  EloquentCollection<int, Postulacion>  $postulaciones  postulaciones de $convocatoria
+     * @return array<int, bool> mapa id de postulación => completo
+     */
+    public function completosDeConvocatoria(Convocatoria $convocatoria, EloquentCollection $postulaciones): array
+    {
+        if ($postulaciones->isEmpty()) {
+            return [];
+        }
+
+        $convocatoria->loadMissing('documentos');
+        $postulaciones->load(['documentos' => fn ($q) => $q->select('id', 'postulacion_id', 'parametro_id')]);
+
+        $exigeLibreta = $convocatoria->documentos->contains(
+            fn (Parametro $d) => $d->codigo === Parametro::DOC_LIBRETA_MILITAR && (bool) $d->pivot->obligatorio,
+        );
+        $perfiles = $exigeLibreta
+            ? PerfilAspirante::query()
+                ->whereIn('user_id', $postulaciones->pluck('user_id')->unique()->all())
+                ->with('sexo')
+                ->get()
+                ->keyBy('user_id')
+            : collect();
+
+        $resultado = [];
+        foreach ($postulaciones as $postulacion) {
+            $postulacion->setRelation('convocatoria', $convocatoria);
             $resultado[$postulacion->id] = $this->faltantesCon($postulacion, $perfiles->get($postulacion->user_id)) === [];
         }
 

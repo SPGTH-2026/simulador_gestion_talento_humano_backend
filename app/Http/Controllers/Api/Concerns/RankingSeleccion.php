@@ -10,6 +10,7 @@ use App\Models\SeleccionCalificacion;
 use App\Models\SeleccionConfiguracion;
 use App\Models\SeleccionFinalistaLista;
 use App\Models\SeleccionRankingParametro;
+use App\Services\DocumentosDePostulacion;
 use Illuminate\Support\Collection;
 
 /**
@@ -20,9 +21,9 @@ use Illuminate\Support\Collection;
  * objetivo), ordena a todos los listos y recién después se pagina. Nada se
  * recalcula por fila ni se cargan documentos, observaciones o historiales.
  *
- * Listo = postulada + habilitado documentalmente + todas las actividades activas
- * calificadas (con sin_actividades basta la habilitación; con la configuración
- * pendiente nadie está listo).
+ * Listo = postulada + habilitado documentalmente + obligatorios aplicables completos
+ * + todas las actividades activas calificadas (con sin_actividades basta lo
+ * documental; con la configuración pendiente nadie está listo).
  *
  * Requiere ResultadosDocumentales y ResultadoAdicional en la clase que lo usa.
  */
@@ -50,6 +51,10 @@ trait RankingSeleccion
         $ids = $postulaciones->pluck('id');
 
         $documentales = $this->estadosDocumentales($ids);
+        // Documentos obligatorios aplicables completos (misma regla que el envío), calculados en bloque para todas las
+        // postulaciones. Una postulación incompleta no es candidata lista aunque su evaluación diga «Cumple»: es el caso de
+        // las evaluaciones anteriores a RF-DOC-006, hechas cuando se podía eliminar un obligatorio.
+        $completas = app(DocumentosDePostulacion::class)->completosDeConvocatoria($convocatoria, $postulaciones);
         $calificaciones = SeleccionCalificacion::query()
             ->where('convocatoria_id', $convocatoria->id)
             ->whereIn('postulacion_id', $ids)
@@ -62,7 +67,7 @@ trait RankingSeleccion
             default => 'sin_actividades',
         };
 
-        $candidatos = $postulaciones->map(function (Postulacion $p) use ($documentales, $calificaciones, $configuracion, $modo) {
+        $candidatos = $postulaciones->map(function (Postulacion $p) use ($documentales, $completas, $calificaciones, $configuracion, $modo) {
             $doc = $documentales->get($p->id);
             $notas = $calificaciones->get($p->id, collect())->keyBy('actividad');
             $centesimas = $notas->map(fn ($n) => $this->centesimas((string) $n->nota))->all();
@@ -73,13 +78,15 @@ trait RankingSeleccion
                 'sin_actividades' => true,
                 default => false,
             };
-            $listo = $doc['estado'] === 'habilitado' && $completo;
+            $documentosCompletos = $completas[$p->id] ?? false;
+            $listo = $doc['estado'] === 'habilitado' && $documentosCompletos && $completo;
 
             return [
                 'id' => $p->id,
                 'aspirante' => $p->user->name,
                 'estado_documental' => $doc['estado'],
                 'cumplimiento_documental' => $doc['cumplimiento'],
+                'documentos_completos' => $documentosCompletos,
                 'resultado' => $resultado,
                 'listo' => $listo,
                 // Cambia si cambia la habilitación, la referencia, el resultado o cualquier nota (valor o fecha de edición).

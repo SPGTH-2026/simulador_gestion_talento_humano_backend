@@ -15,13 +15,15 @@ class ReferenciaDocumental extends Model
 
     protected $fillable = [
         'postulacion_id', 'evaluacion_id', 'evaluador_id', 'designado_por',
-        'justificacion', 'cumplimiento', 'pasa_seleccion', 'evaluacion_actualizada_en',
+        'justificacion', 'cumplimiento', 'pasa_seleccion', 'evaluacion_actualizada_en', 'evaluacion_revision',
     ];
 
     protected function casts(): array
     {
         return [
             'cumplimiento' => 'integer',
+            // Revisión de la evaluación elegida al designarla; 0 = nunca vigente (referencias que ya eran inválidas).
+            'evaluacion_revision' => 'integer',
             'pasa_seleccion' => 'boolean',
             'evaluacion_actualizada_en' => 'datetime',
         ];
