@@ -237,6 +237,13 @@ class ConvocatoriaPostulacionesTest extends TestCase
         $this->postular($convocatorias[0], $aspirante);
         $this->postular($convocatorias[1], $aspirante);
 
+        // Cada petición real arranca con la memoria de parámetros vacía (es un
+        // binding "scoped"). En un test las dos peticiones comparten contenedor y
+        // la segunda aprovecharía lo que cargó la primera: se reinicia antes de
+        // cada medición para que ambas partan del mismo estado de caché. Solo
+        // afecta a lo registrado como scoped (el memo de parámetros); el usuario
+        // autenticado con actingAs vive en el guard y no se toca.
+        $this->app->forgetScopedInstances();
         DB::enableQueryLog();
         $this->actingAs($aspirante)->getJson('/api/convocatorias?per_page=100')->assertOk();
         $conDos = count(DB::getQueryLog());
@@ -246,12 +253,15 @@ class ConvocatoriaPostulacionesTest extends TestCase
             $this->postular($convocatorias[$i], $aspirante);
         }
 
+        $this->app->forgetScopedInstances();
         DB::flushQueryLog();
         DB::enableQueryLog();
         $this->actingAs($aspirante)->getJson('/api/convocatorias?per_page=100')->assertOk();
         $conDiez = count(DB::getQueryLog());
         DB::disableQueryLog();
 
+        // Mismo número de consultas con 2 y con 10 postulaciones: si crece con
+        // las postulaciones, hay un N+1.
         $this->assertSame($conDos, $conDiez);
     }
 
