@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\Concerns\IdentificadorConvocatoria;
 use App\Http\Controllers\Controller;
 use App\Models\Convocatoria;
 use App\Models\ConvocatoriaSkill;
+use App\Models\Ficha;
 use App\Models\Parametro;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
@@ -221,13 +222,24 @@ class ConvocatoriaController extends Controller
         $datos = $this->validar($request, null);
         $fichaId = $this->resolverFicha($user, $request->input('ficha_id'));
 
-        $convocatoria = new Convocatoria();
-        $convocatoria->forceFill($datos['campos'] + [
-            'ficha_id' => $fichaId,
-            'codigo' => $this->siguienteCodigo($fichaId),
-            'estado_id' => $this->parametroId('estado_convocatoria', ConvocatoriaEstado::Borrador->value),
-            'creado_por' => $user->id,
-        ])->save();
+        $estadoBorrador = $this->parametroId('estado_convocatoria', ConvocatoriaEstado::Borrador->value);
+
+        // El código se calcula y se guarda dentro de una transacción que bloquea
+        // la fila de la ficha: así dos altas simultáneas en la misma ficha se
+        // numeran una tras otra y no chocan con la unicidad (ficha_id, codigo).
+        $convocatoria = DB::transaction(function () use ($datos, $fichaId, $estadoBorrador, $user) {
+            Ficha::query()->whereKey($fichaId)->lockForUpdate()->first();
+
+            $nueva = new Convocatoria();
+            $nueva->forceFill($datos['campos'] + [
+                'ficha_id' => $fichaId,
+                'codigo' => $this->siguienteCodigo($fichaId),
+                'estado_id' => $estadoBorrador,
+                'creado_por' => $user->id,
+            ])->save();
+
+            return $nueva;
+        });
 
         $this->reemplazarSkills($convocatoria, $datos['skills'] ?? []);
         $this->reemplazarDocumentos($convocatoria, $this->conDocumentosObligatorios($datos['documentos']));
@@ -931,6 +943,9 @@ class ConvocatoriaController extends Controller
         $ultimo = Convocatoria::query()
             ->where('ficha_id', $fichaId)
             ->where('codigo', 'like', "CONV-{$anio}-%")
+            // Primero el más largo: a partir de la secuencia 1000 el orden por
+            // texto puso CONV-AAAA-999 por encima de CONV-AAAA-1000.
+            ->orderByRaw('LENGTH(codigo) DESC')
             ->orderByDesc('codigo')
             ->value('codigo');
 
