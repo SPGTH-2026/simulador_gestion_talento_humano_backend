@@ -20,7 +20,12 @@ class Evaluacion extends Model
         'perfil',
         'cumplimiento',
         'pasa_seleccion',
+        'correccion_enviada_at',
+        'fecha_limite_correccion',
     ];
+
+    /** Días que tiene el aspirante para corregir desde que el evaluador lo pide. */
+    public const DIAS_LIMITE_CORRECCION = 2;
 
     protected function casts(): array
     {
@@ -29,6 +34,8 @@ class Evaluacion extends Model
             'perfil' => 'array',
             'cumplimiento' => 'integer',
             'pasa_seleccion' => 'boolean',
+            'correccion_enviada_at' => 'datetime',
+            'fecha_limite_correccion' => 'datetime',
             // Sube con cada cambio real y con cada invalidación documental; no está en $fillable: solo la mueve el servidor.
             'revision' => 'integer',
         ];

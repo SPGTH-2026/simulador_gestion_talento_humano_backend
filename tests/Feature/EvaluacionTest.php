@@ -916,6 +916,162 @@ class EvaluacionTest extends TestCase
             ->assertJsonPath('data.evaluacion.documentos_actualizados', ['doc-'.$hoja]);
     }
 
+    public function test_aspirante_envia_la_correccion_solo_cuando_reemplaza_todos_los_marcados(): void
+    {
+        Storage::fake('local');
+
+        $ficha = $this->ficha('2896412');
+        $evaluador = $this->usuario(Role::Aprendiz, 'evaluador', ['ficha_id' => $ficha->id]);
+        $aspirante = $this->usuario(Role::Aspirante, null, ['ficha_id' => $ficha->id]);
+        $convocatoria = $this->convocatoria($ficha);
+        $convocatoria->forceFill([
+            'fecha_apertura' => now('America/Bogota')->subDay()->toDateString(),
+            'fecha_cierre' => now('America/Bogota')->addDay()->toDateString(),
+        ])->save();
+
+        $hoja = $this->parametroId('tipo_documento', 'hoja_de_vida');
+        $identidad = $this->parametroId('tipo_documento', 'documento_identidad');
+        $convocatoria->documentos()->attach($hoja, ['obligatorio' => true, 'ponderacion' => 50]);
+        $convocatoria->documentos()->attach($identidad, ['obligatorio' => true, 'ponderacion' => 50]);
+
+        $postulacion = $this->postulacion($convocatoria, $aspirante);
+
+        // El evaluador marca dos documentos con "Corregir".
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
+            'estado' => 'correccion_solicitada',
+            'observaciones' => 'Subir de nuevo hoja de vida e identidad.',
+            'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 0, 'ponderacion' => 1]],
+            'perfil' => ['doc-'.$hoja => false, 'doc-'.$identidad => false],
+        ])->assertOk();
+
+        // Sin reemplazar nada, el envío se rechaza y no guarda nada.
+        $this->actingAs($aspirante)->postJson("/api/postulaciones/{$postulacion->id}/correccion/enviar")
+            ->assertStatus(422)
+            ->assertJsonPath('faltantes', collect([$hoja, $identidad])->sort()->values()->all());
+
+        // Reemplaza solo uno: sigue faltando el otro.
+        $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
+            ->post("/api/postulaciones/{$postulacion->id}/documentos", [
+                'codigo' => 'hoja_de_vida',
+                'archivo' => UploadedFile::fake()->create('hoja.pdf', 100, 'application/pdf'),
+            ])->assertCreated();
+        $this->actingAs($aspirante)->postJson("/api/postulaciones/{$postulacion->id}/correccion/enviar")
+            ->assertStatus(422)
+            ->assertJsonPath('faltantes', [$identidad]);
+
+        // Reemplaza el segundo: el envío queda registrado.
+        $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
+            ->post("/api/postulaciones/{$postulacion->id}/documentos", [
+                'codigo' => 'documento_identidad',
+                'archivo' => UploadedFile::fake()->create('identidad.pdf', 100, 'application/pdf'),
+            ])->assertCreated();
+        $this->actingAs($aspirante)->postJson("/api/postulaciones/{$postulacion->id}/correccion/enviar")
+            ->assertOk()
+            ->assertJsonStructure(['data' => ['correccion_enviada_at']]);
+
+        // El evaluador y el aspirante ven la fecha del envío, y los reemplazos siguen marcados.
+        $this->actingAs($evaluador)->getJson("/api/evaluaciones/{$postulacion->id}")
+            ->assertOk()
+            ->assertJsonCount(2, 'data.evaluacion.documentos_actualizados')->assertJsonFragment(['doc-'.$hoja])->assertJsonFragment(['doc-'.$identidad]);
+        $this->actingAs($aspirante)->getJson('/api/mis-evaluaciones')
+            ->assertOk()
+            ->assertJsonPath('data.0.correccion_enviada_at', fn ($v) => $v !== null);
+
+        // Otro usuario no puede enviar la corrección de esta postulación.
+        $otro = $this->usuario(Role::Aspirante, null, ['ficha_id' => $ficha->id]);
+        $this->actingAs($otro)->postJson("/api/postulaciones/{$postulacion->id}/correccion/enviar")
+            ->assertNotFound();
+    }
+
+    public function test_pedir_correccion_fija_plazo_de_dos_dias_que_se_conserva_y_se_limpia_al_finalizar(): void
+    {
+        Storage::fake('local');
+
+        $ficha = $this->ficha('2896413');
+        $evaluador = $this->usuario(Role::Aprendiz, 'evaluador', ['ficha_id' => $ficha->id]);
+        $aspirante = $this->usuario(Role::Aspirante, null, ['ficha_id' => $ficha->id]);
+        $convocatoria = $this->convocatoria($ficha);
+        $hoja = $this->parametroId('tipo_documento', 'hoja_de_vida');
+        $convocatoria->documentos()->attach($hoja, ['obligatorio' => true, 'ponderacion' => 100]);
+        $postulacion = $this->postulacion($convocatoria, $aspirante);
+
+        $solicitud = [
+            'estado' => 'correccion_solicitada',
+            'observaciones' => 'La hoja de vida está borrosa.',
+            'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 0, 'ponderacion' => 1]],
+            'perfil' => ['doc-'.$hoja => false],
+        ];
+
+        // 1) Al pedir la corrección se fija un plazo de dos días.
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", $solicitud)->assertOk();
+        $primero = Evaluacion::where('postulacion_id', $postulacion->id)->firstOrFail()->fecha_limite_correccion;
+        $this->assertNotNull($primero);
+        $this->assertEqualsWithDelta(now()->addDays(2)->timestamp, $primero->timestamp, 60);
+
+        // 2) Volver a guardar la misma solicitud conserva el plazo original.
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", $solicitud)->assertOk();
+        $this->assertEquals(
+            $primero->timestamp,
+            Evaluacion::where('postulacion_id', $postulacion->id)->firstOrFail()->fecha_limite_correccion->timestamp,
+        );
+
+        // 3) El aspirante ve el plazo en su listado.
+        $this->actingAs($aspirante)->getJson('/api/mis-evaluaciones')
+            ->assertOk()
+            ->assertJsonPath('data.0.fecha_limite_correccion', fn ($v) => $v !== null);
+
+        // 4) Al finalizar, el plazo deja de aplicar. Antes el aspirante carga la hoja de vida (finalizar exige los obligatorios).
+        $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
+            ->post("/api/postulaciones/{$postulacion->id}/documentos", [
+                'codigo' => 'hoja_de_vida',
+                'archivo' => UploadedFile::fake()->create('hoja.pdf', 100, 'application/pdf'),
+            ])->assertCreated();
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
+            'estado' => 'finalizada',
+            'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 80, 'ponderacion' => 1]],
+            'perfil' => ['doc-'.$hoja => true],
+        ])->assertOk();
+        $this->assertNull(Evaluacion::where('postulacion_id', $postulacion->id)->firstOrFail()->fecha_limite_correccion);
+    }
+
+    public function test_con_el_plazo_vencido_el_aspirante_no_puede_enviar_la_correccion(): void
+    {
+        Storage::fake('local');
+
+        $ficha = $this->ficha('2896414');
+        $evaluador = $this->usuario(Role::Aprendiz, 'evaluador', ['ficha_id' => $ficha->id]);
+        $aspirante = $this->usuario(Role::Aspirante, null, ['ficha_id' => $ficha->id]);
+        $convocatoria = $this->convocatoria($ficha);
+        $hoja = $this->parametroId('tipo_documento', 'hoja_de_vida');
+        $convocatoria->documentos()->attach($hoja, ['obligatorio' => true, 'ponderacion' => 100]);
+        $postulacion = $this->postulacion($convocatoria, $aspirante);
+
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
+            'estado' => 'correccion_solicitada',
+            'observaciones' => 'Hoja de vida borrosa.',
+            'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 0, 'ponderacion' => 1]],
+            'perfil' => ['doc-'.$hoja => false],
+        ])->assertOk();
+
+        // El plazo ya pasó.
+        Evaluacion::where('postulacion_id', $postulacion->id)->update([
+            'fecha_limite_correccion' => now()->subMinute(),
+        ]);
+
+        // Aunque reemplace el documento, el envío se rechaza.
+        $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
+            ->post("/api/postulaciones/{$postulacion->id}/documentos", [
+                'codigo' => 'hoja_de_vida',
+                'archivo' => UploadedFile::fake()->create('hoja.pdf', 100, 'application/pdf'),
+            ])->assertCreated();
+
+        $this->actingAs($aspirante)->postJson("/api/postulaciones/{$postulacion->id}/correccion/enviar")
+            ->assertStatus(422)
+            ->assertJsonPath('errors.correccion.0', fn ($m) => str_contains($m, 'venció'));
+
+        $this->assertNull(Evaluacion::where('postulacion_id', $postulacion->id)->firstOrFail()->correccion_enviada_at);
+    }
+
     public function test_reemplazar_documento_reabre_evaluacion_finalizada_a_en_proceso(): void
     {
         Storage::fake('local');

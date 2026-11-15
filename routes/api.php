@@ -200,6 +200,9 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
     Route::put('evaluaciones/{postulacion}', [EvaluacionController::class, 'upsert'])->middleware('can:evaluacion:evaluar');
 
     Route::get('mis-evaluaciones', [EvaluacionController::class, 'misEvaluaciones'])->middleware('can:propio:evaluaciones');
+    Route::post('postulaciones/{postulacion}/correccion/enviar', [EvaluacionController::class, 'enviarCorreccion'])
+        ->middleware('can:propio:postulaciones')
+        ->whereNumber('postulacion');
 
     // ── Módulo de Selección y Preselección (etapa 1, solo lectura) ─────
     // Fuera del alcance de fichas del actor, la convocatoria responde 404.

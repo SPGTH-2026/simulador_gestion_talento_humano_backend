@@ -266,6 +266,16 @@ class EvaluacionController extends Controller
 
             $existia = $evaluacion->exists;
 
+            // Plazo de corrección: se fija cuando el evaluador la pide por primera vez. Si vuelve a guardar la misma
+            // solicitud, el plazo original se conserva. Un envío del aspirante se limpia con cada cambio del evaluador.
+            $eraCorreccion = $existia
+                && $evaluacion->estado === 'correccion_solicitada'
+                && $evaluacion->fecha_limite_correccion !== null;
+            $evaluacion->correccion_enviada_at = null;
+            $evaluacion->fecha_limite_correccion = $estadoNuevo === 'correccion_solicitada'
+                ? ($eraCorreccion ? $evaluacion->fecha_limite_correccion : now()->addDays(Evaluacion::DIAS_LIMITE_CORRECCION))
+                : null;
+
             $evaluacion->observaciones = $datos['observaciones'] ?? null;
             $evaluacion->estado = $estadoNuevo;
             $evaluacion->perfil = $perfilNuevo;
@@ -359,6 +369,8 @@ class EvaluacionController extends Controller
                 'cumplimiento' => $e->cumplimiento,
                 'pasa_seleccion' => $e->pasa_seleccion,
                 'fecha' => $e->created_at?->toDateString(),
+                'correccion_enviada_at' => $e->correccion_enviada_at?->toIso8601String(),
+                'fecha_limite_correccion' => $e->fecha_limite_correccion?->toIso8601String(),
                 'perfil' => $e->perfil,
                 'documentos_actualizados' => $this->documentosActualizados($e->postulacion, $e),
                 'aspirante' => [
@@ -381,6 +393,73 @@ class EvaluacionController extends Controller
                     'ponderacion' => $d->ponderacion,
                 ]),
             ]),
+        ]);
+    }
+
+    /**
+     * El aspirante envía la corrección: confirma que reemplazó TODOS los documentos
+     * que el evaluador marcó con "Corregir". Solo el dueño de la postulación; los
+     * demás reciben 404. Si faltan documentos, responde 422 y no guarda nada.
+     * Queda registrado el momento del envío (correccion_enviada_at). No se toca
+     * updated_at: así los reemplazos ya hechos siguen contando como actualizados.
+     */
+    public function enviarCorreccion(Request $request, Postulacion $postulacion): JsonResponse
+    {
+        if ($postulacion->user_id !== $request->user()->id) {
+            abort(404, 'Postulación no encontrada.');
+        }
+
+        $evaluacion = Evaluacion::query()
+            ->where('postulacion_id', $postulacion->id)
+            ->where('estado', 'correccion_solicitada')
+            ->latest('id')
+            ->first();
+
+        if (! $evaluacion) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'correccion' => 'No hay una corrección solicitada para esta postulación.',
+            ]);
+        }
+
+        // Ya enviada: se responde igual (idempotente), aunque el plazo haya pasado después.
+        if ($evaluacion->correccion_enviada_at) {
+            return response()->json([
+                'data' => ['correccion_enviada_at' => $evaluacion->correccion_enviada_at->toIso8601String()],
+            ]);
+        }
+
+        // Plazo vencido: el aspirante ya no puede enviar la corrección.
+        if ($evaluacion->fecha_limite_correccion && now()->gt($evaluacion->fecha_limite_correccion)) {
+            $vencio = $evaluacion->fecha_limite_correccion->setTimezone('America/Bogota')->format('d/m/Y');
+
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'correccion' => "El plazo para corregir venció el {$vencio}. Ya no puedes enviar la corrección.",
+            ]);
+        }
+
+        // Documentos que el evaluador marcó con "No" (perfil = false).
+        $marcados = collect($evaluacion->perfil ?? [])
+            ->filter(fn ($valor, $clave) => $valor === false && str_starts_with((string) $clave, 'doc-'))
+            ->keys()
+            ->values();
+
+        $reemplazados = collect($this->documentosActualizados($postulacion, $evaluacion));
+        $faltan = $marcados->diff($reemplazados)->values();
+
+        if ($faltan->isNotEmpty()) {
+            return response()->json([
+                'message' => 'Aún falta reemplazar documentos marcados para corregir.',
+                'errors' => ['documentos' => ['Reemplaza todos los documentos marcados con «Corregir» antes de enviar.']],
+                'faltantes' => $faltan->map(fn ($clave) => (int) substr($clave, 4))->sort()->values()->all(),
+            ], 422);
+        }
+
+        $ahora = now();
+        $evaluacion->timestamps = false;
+        $evaluacion->forceFill(['correccion_enviada_at' => $ahora])->save();
+
+        return response()->json([
+            'data' => ['correccion_enviada_at' => $ahora->toIso8601String()],
         ]);
     }
 
@@ -623,6 +702,8 @@ class EvaluacionController extends Controller
                 'cumplimiento' => $e->cumplimiento,
                 'pasa_seleccion' => $e->pasa_seleccion,
                 'fecha' => $e->created_at?->toDateString(),
+                'correccion_enviada_at' => $e->correccion_enviada_at?->toIso8601String(),
+                'fecha_limite_correccion' => $e->fecha_limite_correccion?->toIso8601String(),
                 'perfil' => $e->perfil,
                 'documentos_actualizados' => $this->documentosActualizados($p, $e),
                 'criterios' => $e->relationLoaded('detalles')
