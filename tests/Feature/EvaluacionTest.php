@@ -79,6 +79,26 @@ class EvaluacionTest extends TestCase
         ]);
     }
 
+    /** El aspirante ya subió todos los documentos obligatorios de la convocatoria (la evaluación exige archivos cargados). */
+    private function conDocumentosCargados(Postulacion $postulacion): Postulacion
+    {
+        $postulacion->convocatoria->load('documentos');
+        foreach ($postulacion->convocatoria->documentos as $documento) {
+            if ($documento->pivot->obligatorio) {
+                $postulacion->documentos()->create([
+                    'nombre_original' => 'archivo.pdf',
+                    'ruta' => "postulaciones/test/{$postulacion->id}-{$documento->id}.pdf",
+                    'disco' => 'local',
+                    'mime' => 'application/pdf',
+                    'tamano_bytes' => 1024,
+                    'parametro_id' => $documento->id,
+                ]);
+            }
+        }
+
+        return $postulacion;
+    }
+
     /** @param array<int,array<string,mixed>> $criterios */
     private function criterios(array $criterios = []): array
     {
@@ -253,7 +273,7 @@ class EvaluacionTest extends TestCase
             'hoja_de_vida' => 50,
             'documento_identidad' => 50,
         ]);
-        $postulacion = $this->postulacion($convocatoria);
+        $postulacion = $this->conDocumentosCargados($this->postulacion($convocatoria));
 
         // El aprendiz evaluador finaliza con el 100 %.
         $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
@@ -299,7 +319,7 @@ class EvaluacionTest extends TestCase
             'hoja_de_vida' => null,
             'documento_identidad' => null,
         ]);
-        $postulacion = $this->postulacion($convocatoria);
+        $postulacion = $this->conDocumentosCargados($this->postulacion($convocatoria));
 
         $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
             'observaciones' => 'Buen perfil',
@@ -549,6 +569,7 @@ class EvaluacionTest extends TestCase
             'hoja_de_vida' => 80,
             'documento_identidad' => 20,
         ]);
+        $this->conDocumentosCargados($postulacion);
 
         // Solo cumple el documento que vale 80 % → 80 % de cumplimiento.
         $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
@@ -605,6 +626,7 @@ class EvaluacionTest extends TestCase
             'hoja_de_vida' => null,
             'documento_identidad' => null,
         ]);
+        $this->conDocumentosCargados($postulacion);
 
         // Dos documentos sin peso y solo uno cumplido → 50 %.
         $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
@@ -631,6 +653,7 @@ class EvaluacionTest extends TestCase
 
         $convocatoria->documentos()->attach($obligatorio, ['obligatorio' => true, 'ponderacion' => null]);
         $convocatoria->documentos()->attach($opcional, ['obligatorio' => false, 'ponderacion' => null]);
+        $this->conDocumentosCargados($postulacion);
 
         // Solo cumple el obligatorio. Si el opcional contara, el resultado sería 50.
         $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
@@ -664,6 +687,7 @@ class EvaluacionTest extends TestCase
             'obligatorio' => true,
             'ponderacion' => 100,
         ]);
+        $this->conDocumentosCargados($postulacion);
 
         $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
             'estado' => 'finalizada',
@@ -693,6 +717,11 @@ class EvaluacionTest extends TestCase
 
         $convocatoria->documentos()->attach($hoja, ['obligatorio' => true, 'ponderacion' => null]);
         $convocatoria->documentos()->attach($libreta, ['obligatorio' => true, 'ponderacion' => null]);
+        // Solo sube la hoja de vida: la libreta no aplica a una mujer y no se le exige.
+        $postulacion->documentos()->create([
+            'nombre_original' => 'hoja.pdf', 'ruta' => "postulaciones/test/{$postulacion->id}-hoja.pdf", 'disco' => 'local',
+            'mime' => 'application/pdf', 'tamano_bytes' => 1024, 'parametro_id' => $hoja,
+        ]);
 
         // La libreta no aplica: solo pesa la hoja de vida.
         $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
@@ -717,6 +746,96 @@ class EvaluacionTest extends TestCase
             'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 100, 'ponderacion' => 1]],
             'cumplimiento' => 100,
         ])->assertStatus(422);
+    }
+
+    // ── Documentos faltantes (RF-DOC-006 + RF-EVA-003) ─────────────────
+
+    /** Postulación a la que solo le falta la hoja de vida (sí subió el documento de identidad). */
+    private function postulacionSinHojaDeVida(): array
+    {
+        $ficha = $this->ficha('2896411');
+        $evaluador = $this->usuario(Role::Aprendiz, 'evaluador', ['ficha_id' => $ficha->id]);
+        $convocatoria = $this->convocatoria($ficha);
+        $ids = $this->documentosConPeso($convocatoria, ['hoja_de_vida' => 40, 'documento_identidad' => 60]);
+        $postulacion = $this->postulacion($convocatoria);
+        $postulacion->documentos()->create([
+            'nombre_original' => 'id.pdf', 'ruta' => "postulaciones/test/{$postulacion->id}-id.pdf", 'disco' => 'local',
+            'mime' => 'application/pdf', 'tamano_bytes' => 1024, 'parametro_id' => $ids['documento_identidad'],
+        ]);
+
+        return [$evaluador, $postulacion, $ids];
+    }
+
+    public function test_no_se_puede_marcar_cumple_un_documento_obligatorio_sin_archivo(): void
+    {
+        [$evaluador, $postulacion, $ids] = $this->postulacionSinHojaDeVida();
+
+        foreach (['en_proceso', 'finalizada'] as $estado) {
+            $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
+                'estado' => $estado,
+                'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 100, 'ponderacion' => 1]],
+                'perfil' => ['doc-'.$ids['hoja_de_vida'] => true, 'doc-'.$ids['documento_identidad'] => true],
+            ])->assertStatus(422)
+                ->assertJsonPath('message', 'No puedes marcar «Cumple» un documento que el aspirante no ha cargado: Hoja de vida.');
+        }
+
+        $this->assertDatabaseCount('evaluaciones', 0);
+    }
+
+    public function test_no_se_puede_finalizar_con_un_obligatorio_aplicable_faltante_aunque_se_marque_no(): void
+    {
+        [$evaluador, $postulacion, $ids] = $this->postulacionSinHojaDeVida();
+
+        // El resto cumple y alcanzaría el 60 %, pero falta un obligatorio: no se finaliza, se pide la corrección.
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
+            'estado' => 'finalizada',
+            'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 60, 'ponderacion' => 1]],
+            'perfil' => ['doc-'.$ids['hoja_de_vida'] => false, 'doc-'.$ids['documento_identidad'] => true],
+        ])->assertStatus(422)
+            ->assertJsonPath('message', 'No se puede finalizar la evaluación: faltan documentos obligatorios (Hoja de vida). Solicita la corrección al aspirante.');
+
+        $this->assertDatabaseCount('evaluaciones', 0);
+    }
+
+    public function test_con_un_obligatorio_faltante_se_puede_guardar_en_proceso_y_pedir_la_correccion(): void
+    {
+        [$evaluador, $postulacion, $ids] = $this->postulacionSinHojaDeVida();
+        $perfil = ['doc-'.$ids['hoja_de_vida'] => false, 'doc-'.$ids['documento_identidad'] => true];
+
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
+            'estado' => 'en_proceso',
+            'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 60, 'ponderacion' => 1]],
+            'perfil' => $perfil,
+        ])->assertOk()->assertJsonPath('data.evaluacion.estado', 'en_proceso')->assertJsonPath('data.evaluacion.pasa_seleccion', null);
+
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
+            'estado' => 'correccion_solicitada',
+            'observaciones' => 'Falta subir la hoja de vida.',
+            'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 60, 'ponderacion' => 1]],
+            'perfil' => $perfil,
+        ])->assertOk()->assertJsonPath('data.evaluacion.estado', 'correccion_solicitada')->assertJsonPath('data.evaluacion.pasa_seleccion', null);
+    }
+
+    public function test_la_libreta_de_una_mujer_y_un_opcional_ausente_no_bloquean_la_finalizacion(): void
+    {
+        $ficha = $this->ficha('2896411');
+        $evaluador = $this->usuario(Role::Aprendiz, 'evaluador', ['ficha_id' => $ficha->id]);
+        $convocatoria = $this->convocatoria($ficha);
+        $aspirante = $this->usuario(Role::Aspirante, null, ['ficha_id' => $ficha->id]);
+        PerfilAspirante::create(['user_id' => $aspirante->id, 'sexo_id' => $this->parametroId('sexo', 'mujer')]);
+        $ids = $this->documentosConPeso($convocatoria, ['hoja_de_vida' => 100, 'libreta_militar' => null]);
+        $convocatoria->documentos()->attach($this->parametroId('tipo_documento', 'tarjeta_profesional'), ['obligatorio' => false, 'ponderacion' => null]);
+        $postulacion = $this->postulacion($convocatoria, $aspirante);
+        $postulacion->documentos()->create([
+            'nombre_original' => 'hv.pdf', 'ruta' => "postulaciones/test/{$postulacion->id}-hv.pdf", 'disco' => 'local',
+            'mime' => 'application/pdf', 'tamano_bytes' => 1024, 'parametro_id' => $ids['hoja_de_vida'],
+        ]);
+
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
+            'estado' => 'finalizada',
+            'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 100, 'ponderacion' => 1]],
+            'perfil' => ['doc-'.$ids['hoja_de_vida'] => true],
+        ])->assertOk()->assertJsonPath('data.evaluacion.pasa_seleccion', true);
     }
 
     public function test_el_conteo_de_documentos_excluye_opcionales_y_no_aplica(): void
@@ -866,6 +985,8 @@ class EvaluacionTest extends TestCase
 
     public function test_pedir_correccion_fija_plazo_de_dos_dias_que_se_conserva_y_se_limpia_al_finalizar(): void
     {
+        Storage::fake('local');
+
         $ficha = $this->ficha('2896413');
         $evaluador = $this->usuario(Role::Aprendiz, 'evaluador', ['ficha_id' => $ficha->id]);
         $aspirante = $this->usuario(Role::Aspirante, null, ['ficha_id' => $ficha->id]);
@@ -899,7 +1020,12 @@ class EvaluacionTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.0.fecha_limite_correccion', fn ($v) => $v !== null);
 
-        // 4) Al finalizar, el plazo deja de aplicar.
+        // 4) Al finalizar, el plazo deja de aplicar. Antes el aspirante carga la hoja de vida (finalizar exige los obligatorios).
+        $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
+            ->post("/api/postulaciones/{$postulacion->id}/documentos", [
+                'codigo' => 'hoja_de_vida',
+                'archivo' => UploadedFile::fake()->create('hoja.pdf', 100, 'application/pdf'),
+            ])->assertCreated();
         $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
             'estado' => 'finalizada',
             'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 80, 'ponderacion' => 1]],
@@ -962,7 +1088,7 @@ class EvaluacionTest extends TestCase
         $hoja = $this->parametroId('tipo_documento', 'hoja_de_vida');
         $convocatoria->documentos()->attach($hoja, ['obligatorio' => true, 'ponderacion' => 100]);
 
-        $postulacion = $this->postulacion($convocatoria, $aspirante);
+        $postulacion = $this->conDocumentosCargados($this->postulacion($convocatoria, $aspirante));
 
         $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
             'estado' => 'finalizada',
@@ -972,13 +1098,13 @@ class EvaluacionTest extends TestCase
             ->assertJsonPath('data.evaluacion.estado', 'finalizada')
             ->assertJsonPath('data.evaluacion.pasa_seleccion', true);
 
-        // Si el aspirante reemplaza el documento, la evaluación finalizada pasa a en_proceso.
+        // Si el aspirante reemplaza el documento (ya existía: 200), la evaluación finalizada pasa a en_proceso.
         $this->actingAs($aspirante)
             ->withHeaders(['Accept' => 'application/json'])
             ->post("/api/postulaciones/{$postulacion->id}/documentos", [
                 'codigo' => 'hoja_de_vida',
                 'archivo' => UploadedFile::fake()->create('hoja_nueva.pdf', 100, 'application/pdf'),
-            ])->assertCreated();
+            ])->assertOk();
 
         $this->actingAs($evaluador)->getJson("/api/evaluaciones/{$postulacion->id}")
             ->assertOk()

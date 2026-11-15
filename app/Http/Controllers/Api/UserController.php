@@ -61,11 +61,7 @@ class UserController extends Controller
             if ($datos['role'] ?? null) {
                 $query->whereIn('ficha_id', $scope);
             } else {
-                $query->where(function ($q) use ($scope) {
-                    $q->where(function ($a) use ($scope) {
-                        $a->whereIn('ficha_id', $scope)->where('role', '!=', Role::Aspirante->value);
-                    })->orWhere('role', Role::Aspirante->value);
-                });
+                $query->enAlcanceDe($actor);
             }
         }
 
@@ -91,6 +87,19 @@ class UserController extends Controller
      */
     public function update(Request $request, User $user): JsonResponse
     {
+        $actor = $request->user();
+
+        // Aislamiento antes que cualquier validación del payload: un aspirante o
+        // aprendiz fuera del alcance del instructor (ficha ajena) responde 404,
+        // sea válido o no el cuerpo, para no revelar que existe.
+        if (
+            $actor->role === Role::Instructor
+            && in_array($user->role, [Role::Aspirante, Role::Aprendiz], true)
+            && ! User::query()->enAlcanceDe($actor)->whereKey($user->id)->exists()
+        ) {
+            abort(404, 'Usuario no encontrado.');
+        }
+
         $datos = $request->validate([
             'role' => ['required', Rule::enum(Role::class)],
             'subrole' => ['nullable', 'string'],
@@ -124,7 +133,6 @@ class UserController extends Controller
             throw ValidationException::withMessages(['subrole' => 'Solo los aprendices tienen subrol']);
         }
 
-        $actor = $request->user();
         if ($actor->role === Role::Instructor) {
             if (in_array($user->role, [Role::Instructor, Role::SuperAdmin], true)) {
                 throw ValidationException::withMessages(['role' => 'No puedes modificar a un instructor o super admin']);

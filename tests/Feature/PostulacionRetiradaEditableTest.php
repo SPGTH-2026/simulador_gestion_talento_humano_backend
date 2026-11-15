@@ -285,9 +285,9 @@ class PostulacionRetiradaEditableTest extends TestCase
             ->assertJsonPath('message', 'Postulación no encontrada.');
     }
 
-    // ── Eliminar un obligatorio deja la postulación incompleta ─────────
+    // ── Un obligatorio cargado no se elimina (RF-DOC-006, acuerdo del 4-nov) ──
 
-    public function test_eliminar_obligatorio_en_retirada_deja_el_estado_incompleto(): void
+    public function test_eliminar_obligatorio_en_retirada_se_rechaza_y_la_postulacion_sigue_completa(): void
     {
         $ficha = $this->ficha();
         $instructor = $this->instructor($ficha);
@@ -305,12 +305,13 @@ class PostulacionRetiradaEditableTest extends TestCase
 
         $this->actingAs($aspirante)
             ->deleteJson("/api/postulaciones/{$postulacion->id}/documentos/{$subida->json('data.id')}")
-            ->assertNoContent();
+            ->assertStatus(422)
+            ->assertJsonPath('errors.documento.0', 'Este documento es obligatorio y no se puede eliminar: reemplázalo por otro archivo.');
 
         $this->actingAs($aspirante)
             ->getJson("/api/postulaciones/{$postulacion->id}/documentos")
             ->assertOk()
-            ->assertJsonPath('data.completo', false);
+            ->assertJsonPath('data.completo', true);
 
         $this->assertSame($antes, $this->estadoDe($postulacion));
     }

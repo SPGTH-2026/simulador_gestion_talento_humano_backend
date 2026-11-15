@@ -213,6 +213,9 @@ class EvaluacionController extends Controller
             abort(422, 'No se puede evaluar: la convocatoria no tiene documentos obligatorios aplicables con ponderación válida.');
         }
 
+        // Un obligatorio aplicable sin archivo no puede marcarse «Cumple» ni permite finalizar (RF-DOC-006 + RF-EVA-003).
+        $this->exigirDocumentosCargados($postulacion, $datos['perfil'] ?? null, $datos['estado'] ?? 'en_proceso');
+
         $evaluacion = DB::transaction(function () use ($request, $postulacion, $datos, $calculado) {
             $actor = $request->user();
 
@@ -234,24 +237,50 @@ class EvaluacionController extends Controller
                 ]);
             }
 
-            // Plazo de corrección: se fija cuando el evaluador la pide por primera vez.
-            // Si vuelve a guardar la misma solicitud, el plazo original se conserva.
-            $eraCorreccion = $evaluacion->exists
-                && $evaluacion->estado === 'correccion_solicitada'
-                && $evaluacion->fecha_limite_correccion !== null;
-            $evaluacion->correccion_enviada_at = null; // el evaluador vuelve a calificar: la corrección anterior ya no vale
-            $evaluacion->observaciones = $datos['observaciones'] ?? null;
-            $evaluacion->estado = $datos['estado'] ?? 'en_proceso';
-            $evaluacion->fecha_limite_correccion = $evaluacion->estado === 'correccion_solicitada'
-                ? ($eraCorreccion ? $evaluacion->fecha_limite_correccion : now()->addDays(Evaluacion::DIAS_LIMITE_CORRECCION))
-                : null;
-            $evaluacion->perfil = $datos['perfil'] ?? null;
-            $evaluacion->cumplimiento = $calculado;
+            // Con la fila bloqueada: dos guardados simultáneos de la misma evaluación se serializan y cada cambio real
+            // suma su propia revisión.
+            if ($evaluacion->exists) {
+                $evaluacion = Evaluacion::query()->lockForUpdate()->findOrFail($evaluacion->id);
+            }
+
+            $estadoNuevo = $datos['estado'] ?? 'en_proceso';
+            $perfilNuevo = $this->canonicoPerfil($datos['perfil'] ?? null);
             // Solo una evaluación finalizada es resultado: un borrador no define si
             // la postulación pasa a selección.
-            $evaluacion->pasa_seleccion = ($evaluacion->estado === 'finalizada' && $evaluacion->cumplimiento !== null)
-                ? $evaluacion->cumplimiento >= self::UMBRAL_SELECCION
+            $pasaNuevo = ($estadoNuevo === 'finalizada' && $calculado !== null)
+                ? $calculado >= self::UMBRAL_SELECCION
                 : null;
+
+            // Reenvío idéntico: no se escribe nada y la revisión se conserva (la referencia sigue vigente). Se compara el
+            // contenido real (el orden de las claves del perfil y de los criterios no cuenta), no lo que Eloquent
+            // considere «sucio».
+            if ($evaluacion->exists
+                && ($evaluacion->observaciones ?? null) === ($datos['observaciones'] ?? null)
+                && $evaluacion->estado === $estadoNuevo
+                && $this->canonicoPerfil($evaluacion->perfil) === $perfilNuevo
+                && $evaluacion->cumplimiento === $calculado
+                && $evaluacion->pasa_seleccion === $pasaNuevo
+                && $this->canonicoCriterios($evaluacion->detalles()->get(['criterio', 'puntaje', 'ponderacion'])->all()) === $this->canonicoCriterios($datos['criterios'])) {
+                return $evaluacion;
+            }
+
+            $existia = $evaluacion->exists;
+
+            // Plazo de corrección: se fija cuando el evaluador la pide por primera vez. Si vuelve a guardar la misma
+            // solicitud, el plazo original se conserva. Un envío del aspirante se limpia con cada cambio del evaluador.
+            $eraCorreccion = $existia
+                && $evaluacion->estado === 'correccion_solicitada'
+                && $evaluacion->fecha_limite_correccion !== null;
+            $evaluacion->correccion_enviada_at = null;
+            $evaluacion->fecha_limite_correccion = $estadoNuevo === 'correccion_solicitada'
+                ? ($eraCorreccion ? $evaluacion->fecha_limite_correccion : now()->addDays(Evaluacion::DIAS_LIMITE_CORRECCION))
+                : null;
+
+            $evaluacion->observaciones = $datos['observaciones'] ?? null;
+            $evaluacion->estado = $estadoNuevo;
+            $evaluacion->perfil = $perfilNuevo;
+            $evaluacion->cumplimiento = $calculado;
+            $evaluacion->pasa_seleccion = $pasaNuevo;
 
             $evaluacion->save();
 
@@ -273,6 +302,14 @@ class EvaluacionController extends Controller
 
             $evaluacion->puntaje_total = $sumaPesos > 0 ? round($sumaPonderada / $sumaPesos, 2) : null;
             $evaluacion->save();
+
+            // Cambio real de una evaluación que ya existía: la revisión sube en 1, de forma atómica (revision = revision + 1
+            // en la base) y con la fila bloqueada. De ella depende la vigencia de la referencia, no del reloj. Una
+            // evaluación nueva nace en la revisión 1.
+            if ($existia) {
+                DB::table('evaluaciones')->where('id', $evaluacion->id)->increment('revision');
+                $evaluacion->refresh();
+            }
 
             return $evaluacion;
         });
@@ -447,6 +484,66 @@ class EvaluacionController extends Controller
         if ($postulacion->estado?->codigo !== PostulacionEstado::Postulada->value) {
             abort(422, 'Solo se pueden evaluar postulaciones enviadas. Esta postulación no ha sido enviada o fue retirada.');
         }
+    }
+
+    /**
+     * Documentos obligatorios aplicables que el aspirante no tiene cargados. Marcar «Cumple» un documento sin archivo
+     * se rechaza siempre; finalizar la evaluación con alguno faltante también (se solicita la corrección). Guardar en
+     * proceso o pedir una corrección con el faltante marcado «No» sí se permite.
+     */
+    private function exigirDocumentosCargados(Postulacion $postulacion, ?array $perfil, string $estado): void
+    {
+        $postulacion->loadMissing('documentos', 'convocatoria.documentos');
+
+        $cargados = $postulacion->documentos->whereNotNull('parametro_id')->pluck('parametro_id')->map(fn ($id) => (int) $id)->all();
+        $faltantes = collect(array_keys($this->pesosDocumentos($postulacion)))
+            ->reject(fn (int $id) => in_array($id, $cargados, true))
+            ->values();
+
+        if ($faltantes->isEmpty()) {
+            return;
+        }
+
+        $nombres = fn ($ids) => $postulacion->convocatoria->documentos->whereIn('id', $ids)->pluck('nombre')->implode(', ');
+
+        $marcados = $faltantes->filter(fn (int $id) => ! empty($perfil["doc-{$id}"]))->values();
+        if ($marcados->isNotEmpty()) {
+            abort(422, 'No puedes marcar «Cumple» un documento que el aspirante no ha cargado: '.$nombres($marcados).'.');
+        }
+
+        if ($estado === 'finalizada') {
+            abort(422, 'No se puede finalizar la evaluación: faltan documentos obligatorios ('.$nombres($faltantes).'). Solicita la corrección al aspirante.');
+        }
+    }
+
+    /** Perfil con las claves en orden estable: el orden en que llegan o se guardan no es contenido. */
+    private function canonicoPerfil(?array $perfil): ?array
+    {
+        if ($perfil === null) {
+            return null;
+        }
+        ksort($perfil);
+
+        return $perfil;
+    }
+
+    /**
+     * Criterios en forma comparable (texto, puntaje y peso a dos decimales, sin orden), tanto si vienen de la solicitud
+     * como si son filas guardadas.
+     *
+     * @param  array<int, mixed>  $criterios
+     * @return array<int, array{string, float, float}>
+     */
+    private function canonicoCriterios(array $criterios): array
+    {
+        $lista = array_map(fn ($c) => [
+            (string) data_get($c, 'criterio'),
+            round((float) data_get($c, 'puntaje'), 2),
+            round((float) (data_get($c, 'ponderacion') ?? 1), 2),
+        ], $criterios);
+        sort($lista);
+
+        return $lista;
     }
 
     /**
