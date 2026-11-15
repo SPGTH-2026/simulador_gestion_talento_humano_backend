@@ -286,6 +286,21 @@ class ConvocatoriaGestionTest extends TestCase
         $this->assertSame("CONV-{$anio}-001", $otraFicha->json('data.codigo'));
     }
 
+    public function test_codigo_sigue_la_secuencia_al_pasar_de_999_a_1000(): void
+    {
+        $ficha = $this->ficha('3173334');
+        $instructor = $this->instructor($ficha);
+        $anio = now('America/Bogota')->year;
+
+        $this->crearConvocatoria($ficha, $instructor, ['codigo' => "CONV-{$anio}-999"]);
+
+        $primera = $this->actingAs($instructor)->postJson('/api/convocatorias', ['nombre' => 'Mil'])->assertCreated();
+        $segunda = $this->actingAs($instructor)->postJson('/api/convocatorias', ['nombre' => 'Mil uno'])->assertCreated();
+
+        $this->assertSame("CONV-{$anio}-1000", $primera->json('data.codigo'));
+        $this->assertSame("CONV-{$anio}-1001", $segunda->json('data.codigo'));
+    }
+
     // ── Crear: validaciones ────────────────────────────────────────────
 
     public function test_nombre_obligatorio_en_espanol(): void
