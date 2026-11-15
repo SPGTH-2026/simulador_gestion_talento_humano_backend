@@ -36,6 +36,8 @@ class Evaluacion extends Model
             'pasa_seleccion' => 'boolean',
             'correccion_enviada_at' => 'datetime',
             'fecha_limite_correccion' => 'datetime',
+            // Sube con cada cambio real y con cada invalidación documental; no está en $fillable: solo la mueve el servidor.
+            'revision' => 'integer',
         ];
     }
 

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\Role;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -98,6 +99,26 @@ class User extends Authenticatable implements MustVerifyEmail
             $this->fichasCreadas()->pluck('fichas.id')->all(),
             $this->ficha_id ? [$this->ficha_id] : [],
         )));
+    }
+
+    /**
+     * Usuarios que `$actor` puede ver/gestionar: los de sus fichas más los
+     * aspirantes todavía sin ficha (para poder incorporarlos a su grupo). El
+     * aspirante o aprendiz asignado a una ficha ajena queda fuera. El super
+     * admin no tiene restricción.
+     */
+    public function scopeEnAlcanceDe(Builder $query, User $actor): Builder
+    {
+        if ($actor->role === Role::SuperAdmin) {
+            return $query;
+        }
+
+        return $query->where(function (Builder $q) use ($actor) {
+            $q->whereIn('ficha_id', $actor->fichaIds())
+                ->orWhere(fn (Builder $libre) => $libre
+                    ->where('role', Role::Aspirante->value)
+                    ->whereNull('ficha_id'));
+        });
     }
 
     /** @return string[] */
