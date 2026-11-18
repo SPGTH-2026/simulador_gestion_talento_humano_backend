@@ -73,12 +73,12 @@ trait GestionaPostulacionPropia
      * Solo aplica a postulaciones aún postuladas; no depende del estado de la
      * convocatoria ni de la fecha de evaluación.
      */
-    private function correccionDocumentosVigente(Postulacion $postulacion): bool
+    private function correccionVigente(Postulacion $postulacion): ?Evaluacion
     {
         $postulacion->loadMissing('estado');
 
         if ($postulacion->estado?->codigo !== PostulacionEstado::Postulada->value) {
-            return false;
+            return null;
         }
 
         return Evaluacion::query()
@@ -86,7 +86,21 @@ trait GestionaPostulacionPropia
             ->where('estado', 'correccion_solicitada')
             ->whereNull('correccion_enviada_at')
             ->where('fecha_limite_correccion', '>=', now())
-            ->exists();
+            ->latest('id')
+            ->first();
+    }
+
+    /**
+     * Durante una corrección vigente solo se reemplazan los documentos marcados
+     * por el evaluador: no se suben adicionales ni se borran documentos.
+     */
+    private function exigirSinCorreccionVigente(Postulacion $postulacion): void
+    {
+        if ($this->correccionVigente($postulacion) !== null) {
+            throw ValidationException::withMessages([
+                'documentos' => 'Durante la corrección solo puedes reemplazar los documentos que el evaluador marcó.',
+            ]);
+        }
     }
 
     /**
@@ -149,7 +163,7 @@ trait GestionaPostulacionPropia
     {
         // Corrección vigente: el aspirante puede reemplazar sus documentos aunque
         // la convocatoria ya esté en proceso o la evaluación haya empezado.
-        if ($clave === 'documentos' && $this->correccionDocumentosVigente($postulacion)) {
+        if ($clave === 'documentos' && $this->correccionVigente($postulacion) !== null) {
             return;
         }
 

@@ -76,6 +76,7 @@ class PostulacionDocumentoController extends Controller
     {
         $this->exigirPropia($request, $postulacion);
         $this->exigirEditable($postulacion, 'documentos');
+        $this->exigirSinCorreccionVigente($postulacion);
 
         return $this->guardarAdicional($request, $postulacion);
     }
@@ -86,6 +87,7 @@ class PostulacionDocumentoController extends Controller
         $this->exigirPropia($request, $postulacion);
         $this->exigirDocumentoDeLaPostulacion($postulacion, $documento);
         $this->exigirEditable($postulacion, 'documentos');
+        $this->exigirSinCorreccionVigente($postulacion);
         $this->exigirQueNoSeaObligatorio($postulacion, $documento);
 
         $this->eliminarDocumento($documento);
@@ -140,6 +142,14 @@ class PostulacionDocumentoController extends Controller
 
         if ($parametro->codigo === Parametro::DOC_LIBRETA_MILITAR) {
             $this->exigirLibretaAplicable($postulacion);
+        }
+
+        // Durante una corrección solo se reemplaza un documento marcado con «Corregir».
+        $correccion = $this->correccionVigente($postulacion);
+        if ($correccion !== null && (($correccion->perfil ?? [])['doc-'.$parametro->id] ?? null) !== false) {
+            throw ValidationException::withMessages([
+                $campo => 'Durante la corrección solo puedes reemplazar los documentos que el evaluador marcó.',
+            ]);
         }
 
         $nuevo = $this->guardarArchivo(
@@ -357,7 +367,7 @@ class PostulacionDocumentoController extends Controller
 
     private function esEditable(Postulacion $postulacion): bool
     {
-        return $this->puedeEditar($postulacion) || $this->correccionDocumentosVigente($postulacion);
+        return $this->puedeEditar($postulacion) || $this->correccionVigente($postulacion) !== null;
     }
 
     // ── Archivos ───────────────────────────────────────────────────────
