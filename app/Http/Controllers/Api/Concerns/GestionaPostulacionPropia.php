@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Concerns;
 
 use App\Enums\PostulacionEstado;
 use App\Enums\VentanaPostulacion;
+use App\Models\Evaluacion;
 use App\Models\Postulacion;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -68,6 +69,27 @@ trait GestionaPostulacionPropia
     }
 
     /**
+     * Hay una corrección pedida por el evaluador, sin enviar y con plazo vigente.
+     * Solo aplica a postulaciones aún postuladas; no depende del estado de la
+     * convocatoria ni de la fecha de evaluación.
+     */
+    private function correccionDocumentosVigente(Postulacion $postulacion): bool
+    {
+        $postulacion->loadMissing('estado');
+
+        if ($postulacion->estado?->codigo !== PostulacionEstado::Postulada->value) {
+            return false;
+        }
+
+        return Evaluacion::query()
+            ->where('postulacion_id', $postulacion->id)
+            ->where('estado', 'correccion_solicitada')
+            ->whereNull('correccion_enviada_at')
+            ->where('fecha_limite_correccion', '>=', now())
+            ->exists();
+    }
+
+    /**
      * Devuelve el motivo legible de por qué no es editable (string vacío si sí lo es).
      */
     private function motivoNoEditable(Postulacion $postulacion): string
@@ -125,6 +147,12 @@ trait GestionaPostulacionPropia
      */
     private function exigirEditable(Postulacion $postulacion, string $clave): void
     {
+        // Corrección vigente: el aspirante puede reemplazar sus documentos aunque
+        // la convocatoria ya esté en proceso o la evaluación haya empezado.
+        if ($clave === 'documentos' && $this->correccionDocumentosVigente($postulacion)) {
+            return;
+        }
+
         $motivo = $this->motivoNoEditable($postulacion);
 
         if ($motivo === '') {

@@ -357,7 +357,7 @@ class PostulacionDocumentoController extends Controller
 
     private function esEditable(Postulacion $postulacion): bool
     {
-        return $this->puedeEditar($postulacion);
+        return $this->puedeEditar($postulacion) || $this->correccionDocumentosVigente($postulacion);
     }
 
     // ── Archivos ───────────────────────────────────────────────────────
