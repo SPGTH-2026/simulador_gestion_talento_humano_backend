@@ -171,6 +171,12 @@ class EvaluacionController extends Controller
                 && $evaluacion->cumplimiento === $calculado
                 && $evaluacion->pasa_seleccion === $pasaNuevo
                 && $this->canonicoCriterios($evaluacion->detalles()->get(['criterio', 'puntaje', 'ponderacion'])->all()) === $this->canonicoCriterios($datos['criterios'])) {
+                // Guardar lo mismo sí cuenta como revisar: si la evaluación venía reabierta por un cambio documental, se quita el aviso.
+                if ($evaluacion->motivo_reapertura !== null) {
+                    $evaluacion->timestamps = false;
+                    $evaluacion->forceFill(['motivo_reapertura' => null, 'reabierta_at' => null])->save();
+                }
+
                 return $evaluacion;
             }
 
@@ -189,6 +195,9 @@ class EvaluacionController extends Controller
             // de la última solicitud de esta evaluación, solo por compatibilidad.
             $evaluacion->correccion_enviada_at = null;
             $evaluacion->fecha_limite_correccion = null;
+            // El evaluador ya revisó: el aviso de reapertura por un cambio documental deja de mostrarse.
+            $evaluacion->motivo_reapertura = null;
+            $evaluacion->reabierta_at = null;
 
             $evaluacion->observaciones = $datos['observaciones'] ?? null;
             // Al pedir corrección la evaluación se guarda primero «en proceso»: si no, el servicio de rondas la leería como una

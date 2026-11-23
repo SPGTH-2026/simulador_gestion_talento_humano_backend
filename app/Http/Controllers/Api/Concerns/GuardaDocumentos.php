@@ -217,6 +217,14 @@ trait GuardaDocumentos
                 if ($evaluacion->estado === 'finalizada') {
                     $evaluacion->estado = 'en_proceso';
                     $evaluacion->pasa_seleccion = null;
+                    // El evaluador ve qué documento cambió y cuándo (BUG-01C: el cambio puede venir de la ronda de otro evaluador).
+                    $nombre = $documento?->parametro?->nombre ?? 'un documento requerido';
+                    $evaluacion->motivo_reapertura = mb_substr(
+                        "El documento «{$nombre}» cambió el ".now('America/Bogota')->format('d/m/Y H:i').'. Revisa la evaluación antes de finalizarla de nuevo.',
+                        0,
+                        255,
+                    );
+                    $evaluacion->reabierta_at = now();
                     $invalidada = true;
                 }
 

@@ -40,6 +40,7 @@ class Evaluacion extends Model
             'fecha_limite_correccion' => 'datetime',
             // Sube con cada cambio real y con cada invalidación documental; no está en $fillable: solo la mueve el servidor.
             'revision' => 'integer',
+            'reabierta_at' => 'datetime',
         ];
     }
 
