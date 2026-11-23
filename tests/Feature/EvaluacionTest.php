@@ -1111,4 +1111,74 @@ class EvaluacionTest extends TestCase
             ->assertJsonPath('data.evaluacion.estado', 'en_proceso')
             ->assertJsonPath('data.evaluacion.pasa_seleccion', null);
     }
+
+    /** Escenario común: evaluador, aspirante y una postulación con la hoja de vida marcada para corregir. */
+    private function escenarioCorreccion(string $estadoConvocatoria = 'publicada'): array
+    {
+        $ficha = $this->ficha('2896499');
+        $evaluador = $this->usuario(Role::Aprendiz, 'evaluador', ['ficha_id' => $ficha->id]);
+        $aspirante = $this->usuario(Role::Aspirante, null, ['ficha_id' => $ficha->id]);
+        $convocatoria = $this->convocatoria($ficha, null, $estadoConvocatoria);
+        $convocatoria->forceFill([
+            'fecha_apertura' => now('America/Bogota')->subDays(5)->toDateString(),
+            'fecha_cierre' => now('America/Bogota')->subDay()->toDateString(),
+        ])->save();
+
+        $hoja = $this->parametroId('tipo_documento', 'hoja_de_vida');
+        $convocatoria->documentos()->attach($hoja, ['obligatorio' => true, 'ponderacion' => 100]);
+        $postulacion = $this->postulacion($convocatoria, $aspirante);
+
+        $cuerpo = fn (string $observaciones) => [
+            'estado' => 'correccion_solicitada',
+            'observaciones' => $observaciones,
+            'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 0, 'ponderacion' => 1]],
+            'perfil' => ['doc-'.$hoja => false],
+        ];
+
+        return [$evaluador, $aspirante, $postulacion, $cuerpo];
+    }
+
+    public function test_no_se_pide_otra_correccion_mientras_hay_una_vigente(): void
+    {
+        [$evaluador, $aspirante, $postulacion, $cuerpo] = $this->escenarioCorreccion();
+
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", $cuerpo('La hoja está borrosa.'))
+            ->assertOk()
+            ->assertJsonPath('data.evaluacion.correccion_estado', 'vigente');
+
+        // Reenvío idéntico: se conserva el comportamiento de siempre.
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", $cuerpo('La hoja está borrosa.'))
+            ->assertOk();
+
+        // Una solicitud distinta encima de la vigente se rechaza y no cambia nada.
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", $cuerpo('Otra observación distinta.'))
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Ya hay una corrección pendiente: espera a que el aspirante responda antes de pedir otra.');
+
+        $evaluacion = Evaluacion::where('postulacion_id', $postulacion->id)->sole();
+        $this->assertSame('La hoja está borrosa.', $evaluacion->observaciones);
+        $this->assertSame(1, Evaluacion::where('postulacion_id', $postulacion->id)->count());
+    }
+
+    public function test_el_estado_de_la_correccion_sale_del_servidor_y_no_depende_de_la_convocatoria(): void
+    {
+        // Convocatoria cerrada (la ventana de postulación ya terminó) con corrección vigente.
+        [$evaluador, $aspirante, $postulacion, $cuerpo] = $this->escenarioCorreccion('cerrada');
+
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", $cuerpo('Reemplaza la hoja.'))->assertOk();
+
+        $this->actingAs($aspirante)->getJson('/api/mis-evaluaciones')
+            ->assertOk()
+            ->assertJsonPath('data.0.correccion_estado', 'vigente');
+
+        $evaluacion = Evaluacion::where('postulacion_id', $postulacion->id)->sole();
+
+        // Plazo vencido sin respuesta.
+        $evaluacion->forceFill(['fecha_limite_correccion' => now()->subMinute()])->save();
+        $this->actingAs($aspirante)->getJson('/api/mis-evaluaciones')->assertJsonPath('data.0.correccion_estado', 'vencida');
+
+        // Respondida.
+        $evaluacion->forceFill(['fecha_limite_correccion' => now()->addDay(), 'correccion_enviada_at' => now()])->save();
+        $this->actingAs($aspirante)->getJson('/api/mis-evaluaciones')->assertJsonPath('data.0.correccion_estado', 'enviada');
+    }
 }

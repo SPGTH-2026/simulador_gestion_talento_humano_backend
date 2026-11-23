@@ -219,6 +219,11 @@ class EvaluacionController extends Controller
         $evaluacion = DB::transaction(function () use ($request, $postulacion, $datos, $calculado) {
             $actor = $request->user();
 
+            // Serializa todos los guardados de ESTA postulación: dos peticiones simultáneas (doble clic, dos pestañas) no
+            // se cruzan ni crean dos evaluaciones, y la comprobación de la corrección pendiente se hace sobre el estado
+            // real, no sobre el que se leyó antes.
+            Postulacion::query()->whereKey($postulacion->id)->lockForUpdate()->first();
+
             // El Instructor/super_admin administra el proceso: si ya existe una
             // evaluación de un aprendiz evaluador, la edita; si no existe, crea
             // la suya. El evaluador siempre guarda la suya.
@@ -262,6 +267,15 @@ class EvaluacionController extends Controller
                 && $evaluacion->pasa_seleccion === $pasaNuevo
                 && $this->canonicoCriterios($evaluacion->detalles()->get(['criterio', 'puntaje', 'ponderacion'])->all()) === $this->canonicoCriterios($datos['criterios'])) {
                 return $evaluacion;
+            }
+
+            // Ya hay una corrección pendiente (pedida, sin enviar y con plazo vigente): no se pide otra encima. El reenvío
+            // idéntico se resolvió arriba y sigue devolviendo la evaluación sin escribir. Abrir una ronda nueva cuando
+            // la anterior venció o fue respondida NO se decide aquí.
+            if ($estadoNuevo === 'correccion_solicitada'
+                && $evaluacion->exists
+                && $evaluacion->estadoCorreccion($postulacion) === 'vigente') {
+                abort(422, 'Ya hay una corrección pendiente: espera a que el aspirante responda antes de pedir otra.');
             }
 
             $existia = $evaluacion->exists;
@@ -340,6 +354,7 @@ class EvaluacionController extends Controller
             'detalles',
             'evaluador:id,name,email',
             'postulacion.convocatoria:id,nombre,cargo,estado_id',
+            'postulacion.estado:id,codigo,nombre',
             'postulacion.user:id,name,email',
             'postulacion.documentos',
         ]);
@@ -371,6 +386,7 @@ class EvaluacionController extends Controller
                 'fecha' => $e->created_at?->toDateString(),
                 'correccion_enviada_at' => $e->correccion_enviada_at?->toIso8601String(),
                 'fecha_limite_correccion' => $e->fecha_limite_correccion?->toIso8601String(),
+                'correccion_estado' => $e->estadoCorreccion($e->postulacion),
                 'perfil' => $e->perfil,
                 'documentos_actualizados' => $this->documentosActualizados($e->postulacion, $e),
                 'aspirante' => [
@@ -704,6 +720,7 @@ class EvaluacionController extends Controller
                 'fecha' => $e->created_at?->toDateString(),
                 'correccion_enviada_at' => $e->correccion_enviada_at?->toIso8601String(),
                 'fecha_limite_correccion' => $e->fecha_limite_correccion?->toIso8601String(),
+                'correccion_estado' => $e->estadoCorreccion($p),
                 'perfil' => $e->perfil,
                 'documentos_actualizados' => $this->documentosActualizados($p, $e),
                 'criterios' => $e->relationLoaded('detalles')
