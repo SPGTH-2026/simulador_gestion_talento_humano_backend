@@ -209,6 +209,9 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
         ->middleware('can:evaluacion:evaluar')->whereNumber('postulacion');
 
     Route::get('mis-evaluaciones', [EvaluacionAspiranteController::class, 'misEvaluaciones'])->middleware('can:propio:evaluaciones');
+    Route::get('postulaciones/{postulacion}/correccion', [EvaluacionAspiranteController::class, 'correccionPropia'])
+        ->middleware('can:propio:postulaciones')
+        ->whereNumber('postulacion');
     Route::post('postulaciones/{postulacion}/correccion/enviar', [EvaluacionAspiranteController::class, 'enviarCorreccion'])
         ->middleware('can:propio:postulaciones')
         ->whereNumber('postulacion');

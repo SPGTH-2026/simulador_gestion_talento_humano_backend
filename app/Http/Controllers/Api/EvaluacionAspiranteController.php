@@ -98,6 +98,23 @@ class EvaluacionAspiranteController extends Controller
     }
 
     /**
+     * Corrección de MI postulación (FE-BUG-03): la ronda actual y su historial, directamente por la postulación. Así la
+     * pantalla de documentos no tiene que bajar todo el listado de evaluaciones. Sin corrección pedida responde data null.
+     */
+    public function correccionPropia(Request $request, Postulacion $postulacion, RondasCorreccion $rondas): JsonResponse
+    {
+        if ($postulacion->user_id !== $request->user()->id) {
+            abort(404, 'Postulación no encontrada.');
+        }
+
+        $resumen = $rondas->resumen($postulacion, $request->user());
+
+        return response()->json([
+            'data' => $resumen['ronda_actual'] === null ? null : ['correccion' => $resumen],
+        ]);
+    }
+
+    /**
      * El aspirante envía la corrección: confirma que reemplazó TODOS los documentos
      * que el evaluador marcó con "Corregir". Solo el dueño de la postulación; los
      * demás reciben 404. Si faltan documentos, responde 422 y no guarda nada.
