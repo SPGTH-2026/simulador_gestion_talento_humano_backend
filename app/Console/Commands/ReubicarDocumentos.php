@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Storage;
 /**
  * Pasa los archivos ya subidos a la estructura nueva:
  *
- *   fichas/{ficha}/usuarios/{usuario}/postulaciones/{postulacion}/{documentos|adicionales|skills}/{archivo}
+ *   fichas/{codigo_ficha}/usuarios/{usuario}/postulaciones/{postulacion}/{documentos|adicionales|skills}/{archivo}
  *
  * Seguro por diseño:
  *  - Sin --ejecutar solo MUESTRA el plan (no copia ni cambia nada).
@@ -26,7 +26,7 @@ class ReubicarDocumentos extends Command
     protected $signature = 'documentos:reubicar
                            {--ejecutar : Aplica los cambios. Sin esta opción solo muestra el plan}';
 
-    protected $description = 'Copia los documentos a la carpeta fichas/{ficha}/usuarios/{usuario}/postulaciones/{postulacion} y actualiza su ruta.';
+    protected $description = 'Copia los documentos a la carpeta fichas/{codigo_ficha}/usuarios/{usuario}/postulaciones/{postulacion} y actualiza su ruta.';
 
     private int $copiados = 0;
     private int $omitidos = 0;
