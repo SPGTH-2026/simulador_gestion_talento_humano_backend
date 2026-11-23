@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Tests\Feature;
+namespace Tests\Feature;
 
 use App\Enums\Role;
 use App\Models\Ficha;

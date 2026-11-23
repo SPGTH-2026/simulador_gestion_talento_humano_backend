@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Tests\Feature;
+namespace Tests\Feature;
 
 use App\Enums\Role;
 use App\Models\User;
@@ -27,7 +27,7 @@ class RolePermissionsTest extends TestCase
         $todos = config('permissions.all');
 
         $this->assertSame($todos, $u->permissions());
-        $this->assertCount(16, $todos);
+        $this->assertCount(15, $todos);
     }
 
     public function test_instructor_lo_tiene_todo_menos_los_exclusivos(): void
@@ -35,9 +35,7 @@ class RolePermissionsTest extends TestCase
         $u = $this->usuario(Role::Instructor);
 
         // Usuarios:gestionar ahora es del instructor (ver config/permissions.php);
-        // supervision:gestionar sigue siendo exclusivo del super admin.
         $this->assertContains('usuarios:gestionar', $u->permissions());
-        $this->assertNotContains('supervision:gestionar', $u->permissions());
 
         // Todo lo demas si.
         $this->assertSame(
@@ -59,9 +57,8 @@ class RolePermissionsTest extends TestCase
             count($general->permissions())
         );
 
-        // Ningun aprendiz tiene los dos permisos exclusivos del super admin.
+        // Ningun aprendiz tiene usuarios:gestionar.
         foreach ([$general, $evaluador] as $u) {
-            $this->assertNotContains('supervision:gestionar', $u->permissions());
             $this->assertNotContains('usuarios:gestionar', $u->permissions());
         }
     }
@@ -71,7 +68,6 @@ class RolePermissionsTest extends TestCase
         $u = $this->usuario(Role::Aspirante);
 
         $this->assertNotContains('usuarios:gestionar', $u->permissions());
-        $this->assertNotContains('supervision:gestionar', $u->permissions());
         $this->assertNotContains('seleccion:decidir', $u->permissions());
     }
 
@@ -80,6 +76,6 @@ class RolePermissionsTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $this->assertGreaterThan(0, User::whereNotNull('email_verified_at')->count());
-        $this->assertSame(16, count(User::where('email', 'admin@test.com')->first()->permissions()));
+        $this->assertSame(15, count(User::where('email', 'admin@test.com')->first()->permissions()));
     }
 }

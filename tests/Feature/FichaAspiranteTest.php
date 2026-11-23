@@ -4,7 +4,7 @@
 // la BD). /api/auth/ficha existe solo para quien entró por Google, que no pudo
 // escribirla en el formulario. Asociar la ficha NO cambia el rol.
 
-namespace App\Tests\Feature;
+namespace Tests\Feature;
 
 use App\Enums\Role;
 use App\Models\Ficha;
@@ -75,6 +75,20 @@ class FichaAspiranteTest extends TestCase
             ->assertOk()
             ->assertJsonPath('user.ficha.id', $ficha->id)
             ->assertJsonPath('user.role', Role::Aspirante->value);
+
+        $this->assertSame($ficha->id, $aspirante->fresh()->ficha_id);
+    }
+
+    public function test_aspirante_con_ficha_no_puede_cambiarla(): void
+    {
+        $ficha = $this->ficha();
+        $otra = Ficha::create(['codigo' => '2631620', 'nombre_programa' => 'Otra ficha']);
+        $aspirante = $this->aspirante(['ficha_id' => $ficha->id]);
+
+        $this->actingAs($aspirante)
+            ->postJson('/api/auth/ficha', ['ficha_codigo' => $otra->codigo])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('ficha_codigo');
 
         $this->assertSame($ficha->id, $aspirante->fresh()->ficha_id);
     }
