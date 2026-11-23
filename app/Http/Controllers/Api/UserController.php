@@ -14,6 +14,18 @@ use Illuminate\Validation\ValidationException;
 class UserController extends Controller
 {
     /**
+     * Reglas de ficha_id. El super admin ve todas las fichas, así que a él sí se le valida que exista. Al instructor NO:
+     * «la ficha no existe» y «la ficha es de otro» deben ser indistinguibles para que no pueda averiguar qué fichas hay
+     * fuera de su alcance. En su caso el alcance lo decide `enAlcanceDe`/`fichaIds()` más abajo, con una sola respuesta.
+     */
+    private function reglasDeFicha(User $actor): array
+    {
+        return $actor->role === Role::SuperAdmin
+            ? ['nullable', 'integer', 'exists:fichas,id']
+            : ['nullable', 'integer'];
+    }
+
+    /**
      * Lista de usuarios, paginada. El super admin ve todo; el instructor ve
      * únicamente los usuarios de sus fichas más los aspirantes sin ficha
      * (para poder traerlos a su grupo). Admite filtrar por rol (p. ej. el
@@ -21,8 +33,10 @@ class UserController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        $actor = $request->user();
+
         $datos = $request->validate([
-            'ficha_id' => ['nullable', 'integer', 'exists:fichas,id'],
+            'ficha_id' => $this->reglasDeFicha($actor),
             'role' => ['nullable', Rule::enum(Role::class)],
             'search' => ['nullable', 'string', 'max:120'],
             // El portafolio documental pide solo gente que ya se haya postulado.
@@ -30,7 +44,6 @@ class UserController extends Controller
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
-        $actor = $request->user();
         $query = User::query()->with('ficha')->withCount('postulaciones');
 
         if ($datos['ficha_id'] ?? null) {
@@ -110,7 +123,7 @@ class UserController extends Controller
             'role' => ['required', Rule::enum(Role::class)],
             'subrole' => ['nullable', 'string'],
             'active' => ['required', 'boolean'],
-            'ficha_id' => ['nullable', 'integer', 'exists:fichas,id'],
+            'ficha_id' => $this->reglasDeFicha($actor),
         ]);
 
         if ($user->id === $request->user()->id) {
