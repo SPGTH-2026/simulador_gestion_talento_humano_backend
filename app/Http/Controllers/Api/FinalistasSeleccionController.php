@@ -114,6 +114,7 @@ class FinalistasSeleccionController extends Controller
             $bloqueadas = Postulacion::query()
                 ->where('convocatoria_id', $fila->id)
                 ->whereIn('id', $ids)
+                ->whereHas('user', fn ($u) => $u->where('active', true))
                 ->orderBy('id')
                 ->lockForUpdate()
                 ->get(['id']);

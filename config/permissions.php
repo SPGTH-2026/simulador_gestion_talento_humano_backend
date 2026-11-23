@@ -8,17 +8,13 @@ return [
         'documentos:ver',
         'evaluacion:ver', 'evaluacion:evaluar',
         'seleccion:ver', 'seleccion:decidir',
-        'reportes:ver', 'supervision:gestionar', 'usuarios:gestionar',
+        'reportes:ver', 'usuarios:gestionar',
         'propio:postulaciones', 'propio:documentos', 'propio:evaluaciones', 'propio:notificaciones',
     ],
 
-    // Permisos EXCLUSIVOS del super admin. El instructor tiene todo lo demás
-    // (incluido usuarios:gestionar, propio:* y convocatorias:postular): es el
-    // administrador de las personas de sus fichas, pero la supervisión global
-    // (ver todo en todas las fichas) queda solo para el super admin.
-    'super_admin_only' => [
-        'supervision:gestionar',
-    ],
+    // Permisos EXCLUSIVOS del super admin. Hoy no hay ninguno: el instructor tiene todo lo
+    // demás (incluido usuarios:gestionar, propio:* y convocatorias:postular).
+    'super_admin_only' => [],
 
     'aspirante' => [
         'dashboard:ver', 'convocatorias:ver', 'convocatorias:postular',

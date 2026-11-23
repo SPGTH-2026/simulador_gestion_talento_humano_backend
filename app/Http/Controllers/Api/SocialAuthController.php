@@ -63,6 +63,12 @@ class SocialAuthController extends Controller
                 return redirect("$front/login?error=sin_correo");
             }
 
+            // Solo se enlaza o crea una cuenta con un correo que el proveedor confirmó. Sin esto, una cuenta social con
+            // un correo sin verificar podía tomar el usuario existente que tiene ese mismo correo.
+            if ((($social->user['email_verified'] ?? false) === true) === false) {
+                return redirect("$front/login?error=correo_no_verificado");
+            }
+
             // Google ya confirmó que el correo pertenece a quien entra, así que si
             // existe un usuario con ese correo (ej. el super admin creado con
             // app:make-admin) se le enlaza esta cuenta social en lugar de crear

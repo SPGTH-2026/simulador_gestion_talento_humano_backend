@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PostulacionEstado;
+use App\Services\RondasCorreccion;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -60,28 +61,24 @@ class Evaluacion extends Model
      */
     public function estadoCorreccion(?Postulacion $postulacion = null): ?string
     {
-        if ($this->estado !== 'correccion_solicitada') {
+        $postulacion ??= $this->postulacion;
+
+        if (! $postulacion) {
             return null;
         }
 
-        if ($this->correccion_enviada_at) {
-            return 'enviada';
+        // El estado sale de las rondas de la POSTULACIÓN (compartidas entre evaluadores), no de esta evaluación.
+        $ronda = app(RondasCorreccion::class)->rondas($postulacion)->last();
+
+        if (! $ronda) {
+            return null;
         }
 
-        $limite = $this->fecha_limite_correccion;
-
-        if ($limite === null || now()->gt($limite)) {
-            return 'vencida';
-        }
-
-        $postulacion ??= $this->postulacion;
-        $postulacion?->loadMissing('estado');
-
-        if ($postulacion && $postulacion->estado?->codigo !== PostulacionEstado::Postulada->value) {
-            return 'inactiva';
-        }
-
-        return 'vigente';
+        return match ($ronda->estado()) {
+            'respondida' => 'enviada',
+            'vigente' => $postulacion->loadMissing('estado')->estado?->codigo === PostulacionEstado::Postulada->value ? 'vigente' : 'inactiva',
+            default => 'vencida',
+        };
     }
 
     public function evaluador(): BelongsTo

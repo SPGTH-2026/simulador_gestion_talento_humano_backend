@@ -3,7 +3,7 @@
 // Prueba del callback de Google SIN red: se falsea Socialite y se verifica que
 // la ruta abre sesión con cookie y NO manda OTP (Google ya confirma el correo).
 
-namespace App\Tests\Feature;
+namespace Tests\Feature;
 
 use App\Enums\Role;
 use App\Models\SocialAccount;
@@ -32,7 +32,8 @@ class SocialCallbackSessionTest extends TestCase
         $social->id = 'google-abc123';
         $social->name = 'Ana Google';
         $social->email = 'ana.'.getmypid().'@test.com';
-        $social->user = ['email' => $social->email];
+        // Google confirma el correo en su userinfo; sin esto el callback ya no crea ni enlaza la cuenta.
+        $social->user = ['email' => $social->email, 'email_verified' => true];
 
         $provider = \Mockery::mock(Provider::class);
         $provider->shouldReceive('stateless')->andReturnSelf();

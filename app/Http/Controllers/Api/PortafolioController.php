@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Enums\PostulacionEstado;
 use App\Enums\Role;
 use App\Http\Controllers\Controller;
+use App\Models\Parametro;
 use App\Models\Postulacion;
 use App\Models\User;
 use App\Services\DocumentosDePostulacion;
@@ -35,14 +36,23 @@ class PortafolioController extends Controller
 
         // Un usuario inhabilitado (active = false) no muestra sus postulaciones en
         // el portafolio. Las filas no se borran: al reactivarlo vuelven a aparecer.
-        $postulaciones = $user->active
-            ? Postulacion::query()
-                ->with(['estado', 'convocatoria.estado', 'documentos', 'skills'])
-                ->where('user_id', $user->id)
-                ->orderByDesc('fecha_postulacion')
-                ->orderByDesc('id')
-                ->get()
-            : collect();
+        // Solo las postulaciones a convocatorias de una ficha que el actor puede ver (el super admin ve todas).
+        $consulta = Postulacion::query()
+            ->with(['estado', 'convocatoria.estado', 'convocatoria.documentos', 'documentos', 'skills'])
+            ->where('user_id', $user->id)
+            ->orderByDesc('fecha_postulacion')
+            ->orderByDesc('id');
+
+        if ($actor->role !== Role::SuperAdmin) {
+            $consulta->whereHas('convocatoria', fn ($c) => $c->whereIn('ficha_id', $actor->fichaIds()));
+        }
+
+        $postulaciones = $user->active ? $consulta->get() : collect();
+
+        // Dos consultas en total (no una por postulación), con la misma regla de «completo» que el envío y la libreta.
+        $completos = $postulaciones->isEmpty() ? [] : $this->documentos->completosPara($postulaciones);
+        $sexoMujer = $user->perfilAspirante()->with('sexo')->first()?->sexo?->codigo === 'mujer';
+        $veCodigo = $actor->role !== Role::Aprendiz;
 
         return response()->json([
             'data' => [
@@ -59,17 +69,19 @@ class PortafolioController extends Controller
                         : null,
                 ],
                 'postulaciones' => $postulaciones
-                    ->map(fn (Postulacion $p) => $this->resumenPostulacion($p))
+                    ->map(fn (Postulacion $p) => $this->resumenPostulacion($p, (bool) ($completos[$p->id] ?? false), $sexoMujer, $veCodigo))
                     ->values(),
             ],
         ]);
     }
 
     /** Tarjeta de una postulación: lo que pinta el listado del portafolio. */
-    private function resumenPostulacion(Postulacion $p): array
+    private function resumenPostulacion(Postulacion $p, bool $completo, bool $sexoMujer, bool $veCodigo): array
     {
+        // La libreta militar no se cuenta como requerida para una aspirante mujer (misma regla que DocumentosDePostulacion).
         $requeridos = $p->convocatoria->documentos
-            ->filter(fn ($parametro) => (bool) $parametro->pivot->obligatorio);
+            ->filter(fn ($parametro) => (bool) $parametro->pivot->obligatorio)
+            ->reject(fn ($parametro) => $sexoMujer && $parametro->codigo === Parametro::DOC_LIBRETA_MILITAR);
         $subidosPorParametro = $p->documentos
             ->whereNotNull('parametro_id')
             ->pluck('parametro_id');
@@ -87,7 +99,8 @@ class PortafolioController extends Controller
             'fecha_retiro' => $p->fecha_retiro?->toIso8601String(),
             'convocatoria' => [
                 'id' => $p->convocatoria->id,
-                'codigo' => $p->convocatoria->codigo,
+                // El código interno (CONV-AAAA-NNN) solo lo ve quien administra la ficha, no los aprendices.
+                'codigo' => $veCodigo ? $p->convocatoria->codigo : null,
                 'nombre' => $p->convocatoria->nombre,
                 'cargo' => $p->convocatoria->cargo,
                 'area' => $p->convocatoria->area,
@@ -95,7 +108,7 @@ class PortafolioController extends Controller
             // Un borrador todavía no es un portafolio: solo lo son las enviadas.
             'puede_ver_documentos' => $p->estado?->codigo !== PostulacionEstado::Borrador->value,
             // Misma regla que la validación del envío (servicio único).
-            'completo' => $this->documentos->completo($p),
+            'completo' => $completo,
             'documentos' => [
                 'requeridos' => $requeridos->count(),
                 'subidos' => $requeridos

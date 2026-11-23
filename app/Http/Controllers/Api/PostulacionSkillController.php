@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Api\Concerns\GestionaPostulacionPropia;
+use App\Http\Controllers\Api\Concerns\GestionaArchivosDocumentos;
 use App\Http\Controllers\Controller;
 use App\Models\ConvocatoriaSkill;
 use App\Models\Postulacion;
 use App\Models\PostulacionSkill;
+use App\Support\RutaDocumento;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -32,6 +34,7 @@ use Symfony\Component\HttpFoundation\Response;
 class PostulacionSkillController extends Controller
 {
     use GestionaPostulacionPropia;
+    use GestionaArchivosDocumentos;
 
     /**
      * Declara una skill. SOLO se admite la skill que PIDE la convocatoria
@@ -173,7 +176,7 @@ class PostulacionSkillController extends Controller
 
         $nuevo = $this->guardarArchivo(
             $request->file('archivo'),
-            "postulaciones/{$skill->postulacion_id}/skills",
+            RutaDocumento::carpeta($skill->postulacion, 'skills'),
         );
         $anterior = [$skill->certificado_disco, $skill->certificado_ruta];
 

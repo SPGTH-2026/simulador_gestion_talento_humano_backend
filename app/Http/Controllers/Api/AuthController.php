@@ -88,6 +88,11 @@ class AuthController extends Controller
             throw ValidationException::withMessages(['ficha_codigo' => 'Tu cuenta ya tiene una ficha asignada']);
         }
 
+        // Una vez asociada, la ficha no la cambia el aspirante: solo la mueve un instructor o el super admin (PATCH usuarios).
+        if ($user->ficha_id !== null) {
+            throw ValidationException::withMessages(['ficha_codigo' => 'Tu cuenta ya tiene una ficha asignada']);
+        }
+
         $data = $request->validate([
             'ficha_codigo' => ['required', 'string', 'max:50'],
         ]);

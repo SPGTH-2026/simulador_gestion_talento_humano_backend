@@ -1,0 +1,32 @@
+name: Cerrar convocatorias vencidas
+
+# El plan gratuito del backend no tiene cron: este workflow llama cada día al endpoint protegido por token.
+# 05:05 UTC = 00:05 en Bogotá (UTC-5), igual que la tarea programada de Laravel.
+on:
+  schedule:
+    - cron: '5 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  disparar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Llamar al disparador
+        env:
+          CRON_TOKEN: ${{ secrets.CRON_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_TOKEN:-}" ]; then
+            echo "Falta el secreto CRON_TOKEN en el repositorio." >&2
+            exit 1
+          fi
+          # El token va en la cabecera (no en la URL) para que no aparezca en los logs. curl no imprime cabeceras.
+          curl --fail --silent --show-error --max-time 120 \
+            --retry 3 --retry-delay 30 \
+            -X POST \
+            -H "Accept: application/json" \
+            -H "Authorization: Bearer ${CRON_TOKEN}" \
+            https://simulador-gestion-talento-humano-backend-12jf.onrender.com/api/tareas/cerrar-vencidas

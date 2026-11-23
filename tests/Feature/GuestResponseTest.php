@@ -3,7 +3,7 @@
 // Backend solo-API: ninguna petición a /api debe acabar en un redirect a una
 // ruta web 'login' (no existe) con 500. Un invitado debe recibir 401 JSON.
 
-namespace App\Tests\Feature;
+namespace Tests\Feature;
 
 use Tests\TestCase;
 

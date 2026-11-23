@@ -90,16 +90,24 @@ class User extends Authenticatable implements MustVerifyEmail
      */
     public function fichaIds(): array
     {
-        if ($this->role === Role::SuperAdmin) {
-            return Ficha::query()->pluck('id')->all();
+        // Memoizado por instancia: un mismo request consulta el alcance decenas de veces; sin memo son 2 consultas cada vez.
+        if ($this->fichaIdsMemo !== null) {
+            return $this->fichaIdsMemo;
         }
 
-        return array_values(array_unique(array_merge(
+        if ($this->role === Role::SuperAdmin) {
+            return $this->fichaIdsMemo = Ficha::query()->pluck('id')->all();
+        }
+
+        return $this->fichaIdsMemo = array_values(array_unique(array_merge(
             $this->fichas()->pluck('fichas.id')->all(),
             $this->fichasCreadas()->pluck('fichas.id')->all(),
             $this->ficha_id ? [$this->ficha_id] : [],
         )));
     }
+
+    /** Caché de fichaIds() para esta instancia (no es un atributo del modelo). */
+    private ?array $fichaIdsMemo = null;
 
     /**
      * Usuarios que `$actor` puede ver/gestionar: los de sus fichas más los

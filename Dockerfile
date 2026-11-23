@@ -64,7 +64,7 @@ EXPOSE 80
 
 # La ruta /up existe (health: '/up' en bootstrap/app.php).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-    CMD curl -fsS http://localhost/up || exit 1
+    CMD curl -fsS http://localhost:${PORT:-80}/up || exit 1
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["apache2-foreground"]
