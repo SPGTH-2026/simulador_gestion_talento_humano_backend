@@ -118,7 +118,7 @@ trait GestionaPostulacionPropia
 
         if ($convocatoria->fecha_apertura && $hoy < $convocatoria->fecha_apertura->toDateString()) {
             return 'La convocatoria aún no está abierta. Abre el '
-                .$convocatoria->fecha_apertura?->toDateString().'.';
+                .$convocatoria->fecha_apertura?->format('d/m/Y').'.';
         }
 
         $codigo = $postulacion->estado?->codigo;
@@ -126,7 +126,7 @@ trait GestionaPostulacionPropia
         if ($codigo === PostulacionEstado::Retirada->value) {
             if ($convocatoria->ventanaPostulacion() !== VentanaPostulacion::Abierta) {
                 return 'La convocatoria ya cerró el '
-                    .$convocatoria->fecha_cierre?->toDateString()
+                    .$convocatoria->fecha_cierre?->format('d/m/Y')
                     .'. Tu postulación retirada queda solo para consulta.';
             }
 
@@ -136,7 +136,7 @@ trait GestionaPostulacionPropia
         if ($codigo === PostulacionEstado::Borrador->value) {
             if ($convocatoria->ventanaPostulacion() !== VentanaPostulacion::Abierta) {
                 return 'La convocatoria ya cerró el '
-                    .$convocatoria->fecha_cierre?->toDateString()
+                    .$convocatoria->fecha_cierre?->format('d/m/Y')
                     .'. Los borradores no se editan fuera de la ventana.';
             }
             return '';
@@ -148,7 +148,7 @@ trait GestionaPostulacionPropia
 
         if ($convocatoria->fecha_evaluacion && $hoy >= $convocatoria->fecha_evaluacion->toDateString()) {
             return 'La evaluación ya comenzó el '
-                .$convocatoria->fecha_evaluacion->toDateString()
+                .$convocatoria->fecha_evaluacion->format('d/m/Y')
                 .'. Los documentos quedaron solo para consulta.';
         }
 

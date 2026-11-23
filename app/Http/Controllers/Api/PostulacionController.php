@@ -411,13 +411,13 @@ class PostulacionController extends Controller
             case VentanaPostulacion::AntesDeApertura:
                 throw ValidationException::withMessages([
                     $clave => 'La convocatoria aún no está abierta. Abre el '
-                        .$convocatoria->fecha_apertura?->toDateString().'.',
+                        .$convocatoria->fecha_apertura?->format('d/m/Y').'.',
                 ]);
 
             case VentanaPostulacion::Cerrada:
                 throw ValidationException::withMessages([
                     $clave => 'La convocatoria ya cerró el '
-                        .$convocatoria->fecha_cierre?->toDateString().'.',
+                        .$convocatoria->fecha_cierre?->format('d/m/Y').'.',
                 ]);
         }
     }

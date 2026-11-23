@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\PostulacionEstado;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -44,6 +45,43 @@ class Evaluacion extends Model
     public function postulacion(): BelongsTo
     {
         return $this->belongsTo(Postulacion::class);
+    }
+
+    /**
+     * Estado de la corrección pedida al aspirante. Es la única definición de «vigente»: la usan la edición del aspirante
+     * y los listados, para que ninguna pantalla recalcule la regla.
+     *
+     *  - null:       no hay corrección solicitada.
+     *  - 'vigente':  pedida, sin enviar, con plazo no vencido y la postulación sigue «Postulada». No depende del estado
+     *                de la convocatoria: una convocatoria cerrada puede tener una corrección vigente.
+     *  - 'enviada':  el aspirante ya respondió.
+     *  - 'vencida':  se acabó el plazo sin respuesta (o la solicitud no tiene plazo registrado).
+     *  - 'inactiva': el plazo corre pero la postulación ya no está «Postulada» (p. ej. retirada).
+     */
+    public function estadoCorreccion(?Postulacion $postulacion = null): ?string
+    {
+        if ($this->estado !== 'correccion_solicitada') {
+            return null;
+        }
+
+        if ($this->correccion_enviada_at) {
+            return 'enviada';
+        }
+
+        $limite = $this->fecha_limite_correccion;
+
+        if ($limite === null || now()->gt($limite)) {
+            return 'vencida';
+        }
+
+        $postulacion ??= $this->postulacion;
+        $postulacion?->loadMissing('estado');
+
+        if ($postulacion && $postulacion->estado?->codigo !== PostulacionEstado::Postulada->value) {
+            return 'inactiva';
+        }
+
+        return 'vigente';
     }
 
     public function evaluador(): BelongsTo

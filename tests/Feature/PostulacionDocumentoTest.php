@@ -533,7 +533,7 @@ class PostulacionDocumentoTest extends TestCase
 
         $url = "/api/postulaciones/{$postulacion->id}/documentos";
 
-        $mensajeEsperado = 'La evaluación ya comenzó el '.$convocatoria->fecha_evaluacion->toDateString().'. Los documentos quedaron solo para consulta.';
+        $mensajeEsperado = 'La evaluación ya comenzó el '.$convocatoria->fecha_evaluacion->format('d/m/Y').'. Los documentos quedaron solo para consulta.';
 
         $this->actingAs($aspirante)
             ->getJson($url)
@@ -590,7 +590,7 @@ class PostulacionDocumentoTest extends TestCase
             ->getJson($url)
             ->assertOk()
             ->assertJsonPath('data.editable', false)
-            ->assertJsonPath('data.motivo_edicion', 'La convocatoria ya cerró el '.$convocatoria->fecha_cierre->toDateString().'. Los borradores no se editan fuera de la ventana.');
+            ->assertJsonPath('data.motivo_edicion', 'La convocatoria ya cerró el '.$convocatoria->fecha_cierre->format('d/m/Y').'. Los borradores no se editan fuera de la ventana.');
 
         $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
             ->post($url, ['codigo' => 'hoja_de_vida', 'archivo' => $this->pdf()])
@@ -615,7 +615,7 @@ class PostulacionDocumentoTest extends TestCase
             ->getJson($url)
             ->assertOk()
             ->assertJsonPath('data.editable', false)
-            ->assertJsonPath('data.motivo_edicion', 'La convocatoria aún no está abierta. Abre el '.$convocatoria->fecha_apertura->toDateString().'.');
+            ->assertJsonPath('data.motivo_edicion', 'La convocatoria aún no está abierta. Abre el '.$convocatoria->fecha_apertura->format('d/m/Y').'.');
 
         $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
             ->post($url, ['codigo' => 'hoja_de_vida', 'archivo' => $this->pdf()])

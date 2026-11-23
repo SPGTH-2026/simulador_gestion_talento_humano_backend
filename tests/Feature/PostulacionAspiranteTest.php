@@ -229,7 +229,7 @@ class PostulacionAspiranteTest extends TestCase
             ->assertStatus(422)
             ->assertJsonPath(
                 'errors.postulacion.0',
-                'La convocatoria aún no está abierta. Abre el '.$convocatoria->fecha_apertura->toDateString().'.',
+                'La convocatoria aún no está abierta. Abre el '.$convocatoria->fecha_apertura->format('d/m/Y').'.',
             );
     }
 
@@ -249,7 +249,7 @@ class PostulacionAspiranteTest extends TestCase
             ->assertStatus(422)
             ->assertJsonPath(
                 'errors.postulacion.0',
-                'La convocatoria ya cerró el '.$convocatoria->fecha_cierre->toDateString().'.',
+                'La convocatoria ya cerró el '.$convocatoria->fecha_cierre->format('d/m/Y').'.',
             );
     }
 

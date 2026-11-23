@@ -376,7 +376,7 @@ class PostulacionBorradorTest extends TestCase
             ->assertStatus(422)
             ->assertJsonPath(
                 'errors.postulacion.0',
-                'La convocatoria ya cerró el '.$convocatoria->fecha_cierre->toDateString().'.',
+                'La convocatoria ya cerró el '.$convocatoria->fecha_cierre->format('d/m/Y').'.',
             );
     }
 
