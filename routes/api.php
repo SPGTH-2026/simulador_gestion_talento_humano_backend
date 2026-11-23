@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\TareasProgramadasController;
 use App\Http\Controllers\Api\DecisionSeleccionController;
 use App\Http\Controllers\Api\EvaluacionController;
 use App\Http\Controllers\Api\EvaluacionAspiranteController;
+use App\Http\Controllers\Api\EvaluacionCorreccionController;
 use App\Http\Controllers\Api\EvaluacionListadoController;
 use App\Http\Controllers\Api\FichaController;
 use App\Http\Controllers\Api\FinalistasSeleccionController;
@@ -203,6 +204,9 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
     Route::get('evaluaciones', [EvaluacionListadoController::class, 'index'])->middleware('can:evaluacion:ver');
     Route::get('evaluaciones/{postulacion}', [EvaluacionController::class, 'show'])->middleware('can:evaluacion:ver');
     Route::put('evaluaciones/{postulacion}', [EvaluacionController::class, 'upsert'])->middleware('can:evaluacion:evaluar');
+    // Autorización excepcional de una ronda de corrección (Instructor en sus fichas, Superadmin en todas).
+    Route::post('evaluaciones/{postulacion}/correcciones/autorizacion', [EvaluacionCorreccionController::class, 'autorizarReapertura'])
+        ->middleware('can:evaluacion:evaluar')->whereNumber('postulacion');
 
     Route::get('mis-evaluaciones', [EvaluacionAspiranteController::class, 'misEvaluaciones'])->middleware('can:propio:evaluaciones');
     Route::post('postulaciones/{postulacion}/correccion/enviar', [EvaluacionAspiranteController::class, 'enviarCorreccion'])

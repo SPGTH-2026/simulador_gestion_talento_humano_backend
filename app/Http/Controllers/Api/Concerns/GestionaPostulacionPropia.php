@@ -4,8 +4,9 @@ namespace App\Http\Controllers\Api\Concerns;
 
 use App\Enums\PostulacionEstado;
 use App\Enums\VentanaPostulacion;
-use App\Models\Evaluacion;
+use App\Models\CorreccionPostulacion;
 use App\Models\Postulacion;
+use App\Services\RondasCorreccion;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
@@ -63,11 +64,11 @@ trait GestionaPostulacionPropia
     }
 
     /**
-     * Hay una corrección pedida por el evaluador, sin enviar y con plazo vigente.
-     * Solo aplica a postulaciones aún postuladas; no depende del estado de la
-     * convocatoria ni de la fecha de evaluación.
+     * Ronda de corrección vigente: pedida por el evaluador, sin responder y con plazo vigente (guardada o antigua aún sin
+     * convertir). Solo aplica a postulaciones aún postuladas; no depende del estado de la convocatoria ni de la fecha de
+     * evaluación.
      */
-    private function correccionVigente(Postulacion $postulacion): ?Evaluacion
+    private function correccionVigente(Postulacion $postulacion): ?CorreccionPostulacion
     {
         $postulacion->loadMissing('estado');
 
@@ -75,13 +76,7 @@ trait GestionaPostulacionPropia
             return null;
         }
 
-        return Evaluacion::query()
-            ->where('postulacion_id', $postulacion->id)
-            ->where('estado', 'correccion_solicitada')
-            ->whereNull('correccion_enviada_at')
-            ->where('fecha_limite_correccion', '>=', now())
-            ->latest('id')
-            ->first();
+        return app(RondasCorreccion::class)->rondaVigente($postulacion);
     }
 
     /**

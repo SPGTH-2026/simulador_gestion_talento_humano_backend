@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\Role;
 use App\Models\Convocatoria;
+use App\Models\CorreccionPostulacion;
 use App\Models\Evaluacion;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -131,9 +132,9 @@ class EvaluacionCorreccionPlazoTest extends TestCase
             'perfil' => ['doc-'.$hoja => false],
         ])->assertOk();
 
-        // El plazo ya pasó.
-        Evaluacion::where('postulacion_id', $postulacion->id)->update([
-            'fecha_limite_correccion' => now()->subMinute(),
+        // El plazo ya pasó (el plazo vive en la ronda de corrección de la postulación).
+        CorreccionPostulacion::where('postulacion_id', $postulacion->id)->update([
+            'fecha_limite' => now()->subMinute(),
         ]);
 
         // Aunque reemplace el documento, el envío se rechaza.
@@ -205,7 +206,7 @@ class EvaluacionCorreccionPlazoTest extends TestCase
         // Una solicitud distinta encima de la vigente se rechaza y no cambia nada.
         $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", $cuerpo('Otra observación distinta.'))
             ->assertStatus(422)
-            ->assertJsonPath('message', 'Ya hay una corrección pendiente: espera a que el aspirante responda antes de pedir otra.');
+            ->assertJsonPath('message', 'Ya hay una corrección pendiente: espera la respuesta del aspirante antes de pedir otra.');
 
         $evaluacion = Evaluacion::where('postulacion_id', $postulacion->id)->sole();
         $this->assertSame('La hoja está borrosa.', $evaluacion->observaciones);
@@ -223,14 +224,14 @@ class EvaluacionCorreccionPlazoTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.0.correccion_estado', 'vigente');
 
-        $evaluacion = Evaluacion::where('postulacion_id', $postulacion->id)->sole();
+        $ronda = CorreccionPostulacion::where('postulacion_id', $postulacion->id)->sole();
 
         // Plazo vencido sin respuesta.
-        $evaluacion->forceFill(['fecha_limite_correccion' => now()->subMinute()])->save();
+        $ronda->forceFill(['fecha_limite' => now()->subMinute()])->save();
         $this->actingAs($aspirante)->getJson('/api/mis-evaluaciones')->assertJsonPath('data.0.correccion_estado', 'vencida');
 
         // Respondida.
-        $evaluacion->forceFill(['fecha_limite_correccion' => now()->addDay(), 'correccion_enviada_at' => now()])->save();
+        $ronda->forceFill(['fecha_limite' => now()->addDay(), 'respondida_at' => now()])->save();
         $this->actingAs($aspirante)->getJson('/api/mis-evaluaciones')->assertJsonPath('data.0.correccion_estado', 'enviada');
     }
 

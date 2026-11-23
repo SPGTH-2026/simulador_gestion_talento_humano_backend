@@ -6,6 +6,7 @@ use App\Enums\Role;
 use App\Http\Controllers\Controller;
 use App\Models\Evaluacion;
 use App\Models\Postulacion;
+use App\Services\RondasCorreccion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -59,7 +60,7 @@ class EvaluacionController extends Controller
             $evaluacion = $this->seleccionarEvaluacionVisible($queryEval->get());
         }
 
-        return response()->json(['data' => $this->presentar($postulacion, $evaluacion, $actor)]);
+        return response()->json(['data' => $this->presentar($postulacion, $evaluacion, $actor, true)]);
     }
 
     public function upsert(Request $request, Postulacion $postulacion): JsonResponse
@@ -115,6 +116,12 @@ class EvaluacionController extends Controller
             // real, no sobre el que se leyó antes.
             Postulacion::query()->whereKey($postulacion->id)->lockForUpdate()->first();
 
+            // Las solicitudes antiguas de esta postulación se guardan como rondas antes de tocar nada, para que un
+            // cambio de estado de la evaluación no las saque del conteo ni del historial. Idempotente; los solapes de
+            // varios evaluadores no se agrupan (ver RondasCorreccion::convertirLegadas).
+            $rondas = app(RondasCorreccion::class);
+            $rondas->convertirLegadas($postulacion);
+
             // El Instructor/super_admin administra el proceso: si ya existe una
             // evaluación de un aprendiz evaluador, la edita; si no existe, crea
             // la suya. El evaluador siempre guarda la suya.
@@ -150,11 +157,11 @@ class EvaluacionController extends Controller
             // Reenvío idéntico: no se escribe nada y la revisión se conserva (la referencia sigue vigente). Se compara el
             // contenido real (el orden de las claves del perfil y de los criterios no cuenta), no lo que Eloquent
             // considere «sucio».
-            // Si el aspirante ya envió la corrección, un «reenvío idéntico» del evaluador sí abre una ronda nueva: no se
-            // puede cortar aquí, o correccion_enviada_at se quedaría puesta y el aspirante no podría volver a corregir.
+            // Si el aspirante ya respondió la última ronda, un «reenvío idéntico» del evaluador sí pide la siguiente: no se
+            // puede cortar aquí, o el aspirante no podría volver a corregir.
             $pideRondaNueva = $estadoNuevo === 'correccion_solicitada'
                 && $evaluacion->exists
-                && $evaluacion->correccion_enviada_at !== null;
+                && $rondas->rondas($postulacion)->last()?->estado() === 'respondida';
 
             if (! $pideRondaNueva
                 && $evaluacion->exists
@@ -167,36 +174,45 @@ class EvaluacionController extends Controller
                 return $evaluacion;
             }
 
-            // Ya hay una corrección pendiente (pedida, sin enviar y con plazo vigente): no se pide otra encima. El reenvío
-            // idéntico se resolvió arriba y sigue devolviendo la evaluación sin escribir. Abrir una ronda nueva cuando
-            // la anterior venció o fue respondida NO se decide aquí.
-            if ($estadoNuevo === 'correccion_solicitada'
-                && $evaluacion->exists
-                && $evaluacion->estadoCorreccion($postulacion) === 'vigente') {
-                abort(422, 'Ya hay una corrección pendiente: espera a que el aspirante responda antes de pedir otra.');
+            // Una solicitud antigua que forma parte de un solape de varios evaluadores no se toca hasta que el administrador
+            // la revise: cambiar el estado de esta evaluación la sacaría del conteo y del historial.
+            if ($evaluacion->exists
+                && $evaluacion->estado === 'correccion_solicitada'
+                && $estadoNuevo !== 'correccion_solicitada'
+                && $rondas->tieneSolapes($postulacion)) {
+                abort(422, 'Esta evaluación forma parte de solicitudes de corrección antiguas simultáneas de varios evaluadores que el administrador debe revisar antes de convertirlas. Por ahora no se puede cambiar su estado.');
             }
 
             $existia = $evaluacion->exists;
 
-            // Plazo de corrección: se fija cuando el evaluador pide la corrección. Si vuelve a guardar una solicitud que
-            // sigue pendiente, el plazo original se conserva. Si el aspirante ya la envió, una nueva solicitud abre otra
-            // ronda con su propio plazo (aunque el anterior haya vencido). Un envío del aspirante se limpia con cada cambio.
-            $eraCorreccion = $existia
-                && $evaluacion->estado === 'correccion_solicitada'
-                && $evaluacion->fecha_limite_correccion !== null
-                && $evaluacion->correccion_enviada_at === null;
+            // El plazo y la respuesta viven en la ronda de corrección (por postulación). Estas columnas quedan como copia
+            // de la última solicitud de esta evaluación, solo por compatibilidad.
             $evaluacion->correccion_enviada_at = null;
-            $evaluacion->fecha_limite_correccion = $estadoNuevo === 'correccion_solicitada'
-                ? ($eraCorreccion ? $evaluacion->fecha_limite_correccion : now()->addDays(Evaluacion::DIAS_LIMITE_CORRECCION))
-                : null;
+            $evaluacion->fecha_limite_correccion = null;
 
             $evaluacion->observaciones = $datos['observaciones'] ?? null;
-            $evaluacion->estado = $estadoNuevo;
+            // Al pedir corrección la evaluación se guarda primero «en proceso»: si no, el servicio de rondas la leería como una
+            // solicitud antigua sin plazo. Pasa a «corrección solicitada» cuando la ronda ya está creada.
+            $evaluacion->estado = $estadoNuevo === 'correccion_solicitada' && $evaluacion->estado !== 'correccion_solicitada'
+                ? 'en_proceso'
+                : $estadoNuevo;
             $evaluacion->perfil = $perfilNuevo;
             $evaluacion->cumplimiento = $calculado;
             $evaluacion->pasa_seleccion = $pasaNuevo;
 
             $evaluacion->save();
+
+            // Pedir corrección = abrir una ronda. Se comprueba bajo el bloqueo de la postulación (ronda vigente, límite de dos
+            // ordinarias compartido entre evaluadores, autorización excepcional); si no procede, 422 y la transacción deshace
+            // el guardado.
+            if ($estadoNuevo === 'correccion_solicitada') {
+                $marcados = collect($perfilNuevo ?? [])
+                    ->filter(fn ($valor, $clave) => $valor === false && str_starts_with((string) $clave, 'doc-'))
+                    ->keys()->map(fn ($clave) => (int) substr((string) $clave, 4))->all();
+
+                $ronda = $rondas->solicitar($postulacion, $actor, $evaluacion, $marcados, (string) ($datos['observaciones'] ?? ''));
+                $evaluacion->forceFill(['estado' => 'correccion_solicitada', 'fecha_limite_correccion' => $ronda->fecha_limite])->saveQuietly();
+            }
 
             $evaluacion->detalles()->delete();
 
@@ -242,7 +258,7 @@ class EvaluacionController extends Controller
         ]);
 
         return response()->json([
-            'data' => $this->presentar($postulacion, $evaluacion->load('detalles'), $request->user()),
+            'data' => $this->presentar($postulacion, $evaluacion->load('detalles'), $request->user(), true),
         ]);
     }
 

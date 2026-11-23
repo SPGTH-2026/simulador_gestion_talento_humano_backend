@@ -6,6 +6,7 @@ use App\Models\Evaluacion;
 use App\Models\Parametro;
 use App\Models\Postulacion;
 use App\Models\User;
+use App\Services\RondasCorreccion;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
@@ -36,7 +37,7 @@ trait PresentaEvaluacion
             ->first();
     }
 
-    private function presentar(Postulacion $p, ?Evaluacion $e, ?User $actor = null): array
+    private function presentar(Postulacion $p, ?Evaluacion $e, ?User $actor = null, bool $conCorreccion = false): array
     {
         // Solo cuentan los documentos OBLIGATORIOS y APLICABLES que el
         // aspirante ya cargó (misma regla que el cálculo del 60 %). No existe
@@ -55,6 +56,8 @@ trait PresentaEvaluacion
 
         return [
             'id' => $p->id,
+            // Rondas de corrección de la postulación (compartidas entre evaluadores): solo en el detalle, no en el listado.
+            'correccion' => $conCorreccion ? app(RondasCorreccion::class)->resumen($p, $actor) : null,
             'estado' => $p->estado?->nombre ?? $p->estado?->codigo,
             'aspirante' => [
                 'id' => $p->user_id,
@@ -117,6 +120,17 @@ trait PresentaEvaluacion
     {
         if (! $p || ! $e || ! $e->updated_at) {
             return [];
+        }
+
+        // Con rondas de corrección: documentos marcados que cambiaron de archivo DESDE la última solicitud (no depende de
+        // que otro evaluador vuelva a guardar su evaluación).
+        $servicio = app(RondasCorreccion::class);
+        $ronda = $servicio->rondas($p)->last();
+        if ($ronda) {
+            return array_map(
+                fn ($id) => 'doc-'.$id,
+                $servicio->reemplazados($p, $ronda, array_map('intval', $ronda->documentos_marcados ?? [])),
+            );
         }
 
         $evalUpdated = Carbon::parse($e->updated_at);

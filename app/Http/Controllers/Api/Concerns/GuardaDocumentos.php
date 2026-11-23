@@ -47,7 +47,7 @@ trait GuardaDocumentos
 
         // Durante una corrección solo se reemplaza un documento marcado con «Corregir».
         $correccion = $this->correccionVigente($postulacion);
-        if ($correccion !== null && (($correccion->perfil ?? [])['doc-'.$parametro->id] ?? null) !== false) {
+        if ($correccion !== null && ! in_array((int) $parametro->id, array_map('intval', $correccion->documentos_marcados ?? []), true)) {
             throw ValidationException::withMessages([
                 $campo => 'Durante la corrección solo puedes reemplazar los documentos que el evaluador marcó.',
             ]);
