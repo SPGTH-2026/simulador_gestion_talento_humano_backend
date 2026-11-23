@@ -270,25 +270,45 @@ class EvaluacionController extends Controller
             }
 
             // Ya hay una corrección pendiente (pedida, sin enviar y con plazo vigente): no se pide otra encima. El reenvío
-            // idéntico se resolvió arriba y sigue devolviendo la evaluación sin escribir. Abrir una ronda nueva cuando
-            // la anterior venció o fue respondida NO se decide aquí.
+            // idéntico se resolvió arriba y sigue devolviendo la evaluación sin escribir. Si el aspirante ya respondió,
+            // el evaluador puede volver a pedir corrección dentro del mismo plazo (el plazo no cambia).
             if ($estadoNuevo === 'correccion_solicitada'
                 && $evaluacion->exists
                 && $evaluacion->estadoCorreccion($postulacion) === 'vigente') {
                 abort(422, 'Ya hay una corrección pendiente: espera a que el aspirante responda antes de pedir otra.');
             }
 
+            // Plazo vencido sin respuesta: no se reabre la corrección (el plazo no se reinicia ni se extiende).
+            // Si el aspirante ya respondió, sí se puede volver a pedir dentro del mismo plazo (ver más abajo).
+            if ($estadoNuevo === 'correccion_solicitada'
+                && $evaluacion->exists
+                && $evaluacion->estadoCorreccion($postulacion) === 'vencida') {
+                abort(422, 'El plazo para corregir ya venció: no se puede volver a pedir la corrección.');
+            }
+
             $existia = $evaluacion->exists;
 
-            // Plazo de corrección: se fija cuando el evaluador la pide por primera vez. Si vuelve a guardar la misma
-            // solicitud, el plazo original se conserva. Un envío del aspirante se limpia con cada cambio del evaluador.
+            // Plazo de corrección: se fija cuando el evaluador pide la corrección por primera vez y dura mientras la
+            // ronda siga abierta. La ronda sigue abierta si el evaluador vuelve a guardar la misma solicitud, o si guarda
+            // un borrador (en_proceso) y vuelve a pedir la corrección antes de que venza el plazo. Solo una solicitud
+            // hecha después de vencer abre un plazo nuevo. Al finalizar, el plazo se borra.
             $eraCorreccion = $existia
                 && $evaluacion->estado === 'correccion_solicitada'
                 && $evaluacion->fecha_limite_correccion !== null;
+            $rondaAbierta = $existia
+                && $evaluacion->fecha_limite_correccion !== null
+                && now()->lte($evaluacion->fecha_limite_correccion);
+            // Un reenvío idéntico ya salió arriba sin escribir nada, así que aquí siempre hay un cambio real: la respuesta
+            // del aspirante deja de valer y debe responder de nuevo (por ejemplo, para corregir un archivo subido mal).
             $evaluacion->correccion_enviada_at = null;
-            $evaluacion->fecha_limite_correccion = $estadoNuevo === 'correccion_solicitada'
-                ? ($eraCorreccion ? $evaluacion->fecha_limite_correccion : now()->addDays(Evaluacion::DIAS_LIMITE_CORRECCION))
-                : null;
+            if ($estadoNuevo === 'correccion_solicitada') {
+                $evaluacion->fecha_limite_correccion = ($eraCorreccion || $rondaAbierta)
+                    ? $evaluacion->fecha_limite_correccion
+                    : now()->addDays(Evaluacion::DIAS_LIMITE_CORRECCION);
+            } elseif ($estadoNuevo !== 'en_proceso') {
+                $evaluacion->fecha_limite_correccion = null;
+            }
+            // En 'en_proceso' (borrador) el plazo se conserva: sigue corriendo mientras el evaluador continúa la evaluación.
 
             $evaluacion->observaciones = $datos['observaciones'] ?? null;
             $evaluacion->estado = $estadoNuevo;

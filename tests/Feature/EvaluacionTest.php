@@ -1034,6 +1034,39 @@ class EvaluacionTest extends TestCase
         $this->assertNull(Evaluacion::where('postulacion_id', $postulacion->id)->firstOrFail()->fecha_limite_correccion);
     }
 
+    public function test_guardar_borrador_y_volver_a_pedir_la_correccion_no_reinicia_el_plazo(): void
+    {
+        $ficha = $this->ficha('2896414');
+        $evaluador = $this->usuario(Role::Aprendiz, 'evaluador', ['ficha_id' => $ficha->id]);
+        $convocatoria = $this->convocatoria($ficha);
+        $hoja = $this->parametroId('tipo_documento', 'hoja_de_vida');
+        $convocatoria->documentos()->attach($hoja, ['obligatorio' => true, 'ponderacion' => 100]);
+        $postulacion = $this->postulacion($convocatoria, $this->usuario(Role::Aspirante, null, ['ficha_id' => $ficha->id]));
+        $url = "/api/evaluaciones/{$postulacion->id}";
+        $solicitud = [
+            'estado' => 'correccion_solicitada',
+            'observaciones' => 'La hoja de vida está borrosa.',
+            'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 0, 'ponderacion' => 1]],
+            'perfil' => ['doc-'.$hoja => false],
+        ];
+        $limite = fn () => Evaluacion::where('postulacion_id', $postulacion->id)->firstOrFail()->fecha_limite_correccion;
+
+        $this->actingAs($evaluador)->putJson($url, $solicitud)->assertOk();
+        $primero = $limite();
+
+        // El evaluador guarda un borrador y vuelve a pedir la corrección dentro del plazo: se conserva el original.
+        $this->actingAs($evaluador)->putJson($url, array_merge($solicitud, ['estado' => 'en_proceso']))->assertOk();
+        $this->assertEquals($primero->timestamp, $limite()->timestamp);
+        $this->actingAs($evaluador)->putJson($url, array_merge($solicitud, ['observaciones' => 'Otra observación.']))->assertOk();
+        $this->assertEquals($primero->timestamp, $limite()->timestamp);
+
+        // Si el plazo ya venció antes de volver a pedirla, la nueva solicitud abre un plazo nuevo de dos días.
+        Evaluacion::where('postulacion_id', $postulacion->id)->firstOrFail()->forceFill(['fecha_limite_correccion' => now()->subMinute()])->save();
+        $this->actingAs($evaluador)->putJson($url, array_merge($solicitud, ['estado' => 'en_proceso']))->assertOk();
+        $this->actingAs($evaluador)->putJson($url, $solicitud)->assertOk();
+        $this->assertEqualsWithDelta(now()->addDays(2)->timestamp, $limite()->timestamp, 60);
+    }
+
     public function test_con_el_plazo_vencido_el_aspirante_no_puede_enviar_la_correccion(): void
     {
         Storage::fake('local');
@@ -1158,6 +1191,82 @@ class EvaluacionTest extends TestCase
         $evaluacion = Evaluacion::where('postulacion_id', $postulacion->id)->sole();
         $this->assertSame('La hoja está borrosa.', $evaluacion->observaciones);
         $this->assertSame(1, Evaluacion::where('postulacion_id', $postulacion->id)->count());
+    }
+
+    public function test_con_la_convocatoria_en_proceso_la_correccion_vigente_se_puede_responder_sin_tocar_nada_mas(): void
+    {
+        Storage::fake('local');
+
+        [$evaluador, $aspirante, $postulacion, $cuerpo] = $this->escenarioCorreccion('en_proceso');
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", $cuerpo('Reemplaza la hoja.'))->assertOk();
+
+        $evaluacion = Evaluacion::where('postulacion_id', $postulacion->id)->sole();
+        $limiteAntes = $evaluacion->fecha_limite_correccion->timestamp;
+        $convocatoria = Convocatoria::findOrFail($postulacion->convocatoria_id);
+        $convocatoriaAntes = [$convocatoria->estado?->codigo, $convocatoria->updated_at?->timestamp, $convocatoria->fecha_cierre?->toDateString()];
+
+        // La pantalla de documentos del aspirante muestra la postulación como editable mientras la corrección está vigente.
+        $this->actingAs($aspirante)->getJson("/api/postulaciones/{$postulacion->id}/documentos")
+            ->assertOk()
+            ->assertJsonPath('data.editable', true);
+
+        // El aspirante sube el documento marcado y envía la corrección, con la convocatoria ya en proceso.
+        $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
+            ->post("/api/postulaciones/{$postulacion->id}/documentos", [
+                'codigo' => 'hoja_de_vida',
+                'archivo' => UploadedFile::fake()->create('hoja.pdf', 100, 'application/pdf'),
+            ])->assertSuccessful();
+        $this->actingAs($aspirante)->postJson("/api/postulaciones/{$postulacion->id}/correccion/enviar")->assertOk();
+
+        // El plazo de 2 días no cambia y la convocatoria queda igual.
+        $evaluacion->refresh();
+        $this->assertSame($limiteAntes, $evaluacion->fecha_limite_correccion->timestamp);
+        $this->assertNotNull($evaluacion->correccion_enviada_at);
+        $convocatoria->refresh();
+        $this->assertSame($convocatoriaAntes, [$convocatoria->estado?->codigo, $convocatoria->updated_at?->timestamp, $convocatoria->fecha_cierre?->toDateString()]);
+    }
+
+    public function test_despues_de_la_respuesta_el_evaluador_puede_volver_a_pedir_corregir_dentro_del_mismo_plazo(): void
+    {
+        Storage::fake('local');
+
+        [$evaluador, $aspirante, $postulacion, $cuerpo] = $this->escenarioCorreccion('en_proceso');
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", $cuerpo('La hoja está borrosa.'))->assertOk();
+        $limite = Evaluacion::where('postulacion_id', $postulacion->id)->sole()->fecha_limite_correccion->timestamp;
+
+        // El aspirante responde subiendo el documento marcado.
+        $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
+            ->post("/api/postulaciones/{$postulacion->id}/documentos", [
+                'codigo' => 'hoja_de_vida',
+                'archivo' => UploadedFile::fake()->create('hoja.pdf', 100, 'application/pdf'),
+            ])->assertSuccessful();
+        $this->actingAs($aspirante)->postJson("/api/postulaciones/{$postulacion->id}/correccion/enviar")->assertOk();
+
+        // El evaluador revisa y ve que el archivo subido no era el correcto: vuelve a pedir corrección.
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", $cuerpo('Subiste un archivo equivocado.'))
+            ->assertOk();
+
+        $evaluacion = Evaluacion::where('postulacion_id', $postulacion->id)->sole();
+        $this->assertSame($limite, $evaluacion->fecha_limite_correccion->timestamp, 'El plazo de 2 días no cambia.');
+        $this->assertNull($evaluacion->correccion_enviada_at, 'El aspirante debe responder de nuevo.');
+
+        $this->actingAs($aspirante)->getJson('/api/mis-evaluaciones')
+            ->assertOk()
+            ->assertJsonPath('data.0.correccion_estado', 'vigente');
+    }
+
+    public function test_no_se_vuelve_a_pedir_corregir_con_el_plazo_vencido(): void
+    {
+        [$evaluador, , $postulacion, $cuerpo] = $this->escenarioCorreccion('en_proceso');
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", $cuerpo('La hoja está borrosa.'))->assertOk();
+
+        Evaluacion::where('postulacion_id', $postulacion->id)->sole()
+            ->forceFill(['fecha_limite_correccion' => now()->subMinute()])->save();
+
+        $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", $cuerpo('Otra observación.'))
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'El plazo para corregir ya venció: no se puede volver a pedir la corrección.');
+        $this->assertSame('La hoja está borrosa.', Evaluacion::where('postulacion_id', $postulacion->id)->sole()->observaciones);
     }
 
     public function test_el_estado_de_la_correccion_sale_del_servidor_y_no_depende_de_la_convocatoria(): void
