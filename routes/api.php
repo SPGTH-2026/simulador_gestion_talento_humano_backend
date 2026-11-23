@@ -5,14 +5,19 @@ use App\Http\Controllers\Api\CalificacionSeleccionController;
 use App\Http\Controllers\Api\ComparacionSeleccionController;
 use App\Http\Controllers\Api\ConfiguracionSeleccionController;
 use App\Http\Controllers\Api\ConvocatoriaController;
+use App\Http\Controllers\Api\ListadoConvocatoriasController;
+use App\Http\Controllers\Api\TareasProgramadasController;
 use App\Http\Controllers\Api\DecisionSeleccionController;
 use App\Http\Controllers\Api\EvaluacionController;
+use App\Http\Controllers\Api\EvaluacionAspiranteController;
+use App\Http\Controllers\Api\EvaluacionListadoController;
 use App\Http\Controllers\Api\FichaController;
 use App\Http\Controllers\Api\FinalistasSeleccionController;
 use App\Http\Controllers\Api\ParametroController;
 use App\Http\Controllers\Api\PerfilAspiranteController;
 use App\Http\Controllers\Api\PortafolioController;
 use App\Http\Controllers\Api\PostulacionController;
+use App\Http\Controllers\Api\PostulacionEstadoController;
 use App\Http\Controllers\Api\PostulacionDocumentoController;
 use App\Http\Controllers\Api\PostulacionSkillController;
 use App\Http\Controllers\Api\RankingSeleccionController;
@@ -91,7 +96,7 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
     Route::post('parametros/documentos', [ParametroController::class, 'storeDocumento'])
         ->middleware('can:convocatorias:gestionar');
 
-    Route::get('convocatorias', [ConvocatoriaController::class, 'index'])->middleware('can:convocatorias:ver');
+    Route::get('convocatorias', [ListadoConvocatoriasController::class, 'index'])->middleware('can:convocatorias:ver');
     Route::post('convocatorias', [ConvocatoriaController::class, 'store'])->middleware('can:convocatorias:gestionar');
     Route::get('convocatorias/{convocatoria}', [ConvocatoriaController::class, 'show'])
         ->whereNumber('convocatoria')->middleware('can:convocatorias:ver');
@@ -115,14 +120,14 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
     Route::get('postulaciones', [PostulacionController::class, 'index'])
         ->middleware('can:propio:postulaciones');
 
-    Route::patch('postulaciones/{postulacion}/estado', [PostulacionController::class, 'estado'])
+    Route::patch('postulaciones/{postulacion}/estado', [PostulacionEstadoController::class, 'estado'])
         ->whereNumber('postulacion')
         ->missing(fn () => abort(404, 'Postulación no encontrada.'))
         ->middleware('can:propio:postulaciones');
 
     // Envío del borrador: valida los documentos obligatorios y pasa a
     // 'postulada'. 'postulada' ya NO se alcanza con el PATCH anterior.
-    Route::post('postulaciones/{postulacion}/enviar', [PostulacionController::class, 'enviar'])
+    Route::post('postulaciones/{postulacion}/enviar', [PostulacionEstadoController::class, 'enviar'])
         ->whereNumber('postulacion')
         ->missing(fn () => abort(404, 'Postulación no encontrada.'))
         ->middleware('can:propio:postulaciones');
@@ -195,12 +200,12 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
         ->missing(fn () => abort(404, 'Portafolio no encontrado.'));
 
     // ── Módulo de Evaluación ──────────────────────────────────────────
-    Route::get('evaluaciones', [EvaluacionController::class, 'index'])->middleware('can:evaluacion:ver');
+    Route::get('evaluaciones', [EvaluacionListadoController::class, 'index'])->middleware('can:evaluacion:ver');
     Route::get('evaluaciones/{postulacion}', [EvaluacionController::class, 'show'])->middleware('can:evaluacion:ver');
     Route::put('evaluaciones/{postulacion}', [EvaluacionController::class, 'upsert'])->middleware('can:evaluacion:evaluar');
 
-    Route::get('mis-evaluaciones', [EvaluacionController::class, 'misEvaluaciones'])->middleware('can:propio:evaluaciones');
-    Route::post('postulaciones/{postulacion}/correccion/enviar', [EvaluacionController::class, 'enviarCorreccion'])
+    Route::get('mis-evaluaciones', [EvaluacionAspiranteController::class, 'misEvaluaciones'])->middleware('can:propio:evaluaciones');
+    Route::post('postulaciones/{postulacion}/correccion/enviar', [EvaluacionAspiranteController::class, 'enviarCorreccion'])
         ->middleware('can:propio:postulaciones')
         ->whereNumber('postulacion');
 
@@ -279,3 +284,9 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
 // que el correo esté confirmado. Al crear cada endpoint:
 //   Route::middleware(['auth:sanctum', 'verified'])
 //       ->get('...', ...)->middleware('can:...');
+
+// Disparador externo de tareas programadas (plan gratuito, sin cron). Fuera del grupo autenticado: lo protege el
+// token CRON_TOKEN dentro del controlador. Limitado a 10 peticiones por minuto.
+Route::post('tareas/{tarea}', [TareasProgramadasController::class, 'ejecutar'])
+    ->where('tarea', '[a-z\-]+')
+    ->middleware('throttle:10,1');

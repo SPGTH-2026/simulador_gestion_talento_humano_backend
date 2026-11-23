@@ -46,6 +46,8 @@ trait RankingSeleccion
             ->with('user:id,name')
             ->where('convocatoria_id', $convocatoria->id)
             ->where('estado_id', $postulada->id)
+            // Los usuarios inhabilitados no entran al ranking ni consumen cupos.
+            ->whereHas('user', fn ($u) => $u->where('active', true))
             ->orderBy('id')
             ->get();
         $ids = $postulaciones->pluck('id');

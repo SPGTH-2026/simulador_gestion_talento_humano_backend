@@ -16,9 +16,16 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         // Sesión + cookies para peticiones que vengan del front (lista SANCTUM_STATEFUL_DOMAINS).
         $middleware->statefulApi();
-        $middleware->trustProxies(at: '*');
+        // Solo confían en las cabeceras X-Forwarded-* los proxies de la red privada (o los que
+        // indique TRUSTED_PROXIES). Con '*', cualquier cliente falsificaba su IP y burlaba los rate limiters.
+        $middleware->trustProxies(at: array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('TRUSTED_PROXIES', '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1/32')),
+        ))));
         // Server-Timing: solo agrega la cabecera si SERVER_TIMING=true.
         $middleware->append(\App\Http\Middleware\ServerTiming::class);
+        // Sesión por cookie: inactividad y usuario desactivado (ver VerificarSesionActiva).
+        $middleware->appendToGroup('api', \App\Http\Middleware\VerificarSesionActiva::class);
 
         $middleware->alias([
             'verified' => EnsureEmailIsVerified::class,

@@ -27,6 +27,7 @@ class UserController extends Controller
             'search' => ['nullable', 'string', 'max:120'],
             // El portafolio documental pide solo gente que ya se haya postulado.
             'con_postulaciones' => ['nullable', 'boolean'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
         $actor = $request->user();
@@ -65,7 +66,12 @@ class UserController extends Controller
             }
         }
 
-        $usuarios = $query->orderBy('role')->orderBy('name')->paginate(20);
+        // Orden global por rol (aspirante, aprendiz, instructor, resto) y nombre: la página se ordena en el servidor, no en
+        // el cliente, para que cada página empiece donde termina la anterior.
+        $usuarios = $query
+            ->orderByRaw("CASE role WHEN 'aspirante' THEN 0 WHEN 'aprendiz' THEN 1 WHEN 'instructor' THEN 2 ELSE 3 END")
+            ->orderBy('name')
+            ->paginate($datos['per_page'] ?? 20);
 
         return response()->json([
             'data' => $usuarios->getCollection()->map(fn (User $u) => $this->presentar($u)),

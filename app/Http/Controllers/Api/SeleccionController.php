@@ -14,6 +14,7 @@ use App\Models\Evaluacion;
 use App\Models\Parametro;
 use App\Models\Postulacion;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
@@ -105,6 +106,17 @@ class SeleccionController extends Controller
      */
     private function convocatoriasConAtencion($consulta, bool $veCodigo): JsonResponse
     {
+        // Cacheado 60 s por usuario y alcance: es el listado más costoso (un ranking por convocatoria) y no necesita tiempo
+        // real. Tras una acción puede tardar hasta 60 s en reflejarse.
+        $actor = request()->user();
+        $clave = 'seleccion.atencion.'.$actor->id.'.'.sha1(json_encode([$actor->fichaIds(), $veCodigo]));
+
+        return response()->json(Cache::remember($clave, 60, fn () => $this->calcularConvocatoriasConAtencion($consulta, $veCodigo)));
+    }
+
+    /** @return array{data: array, meta: array} */
+    private function calcularConvocatoriasConAtencion($consulta, bool $veCodigo): array
+    {
         $enProceso = Parametro::porTemaYCodigo('estado_convocatoria', ConvocatoriaEstado::EnProceso->value);
         $postulada = Parametro::porTemaYCodigo('estado_postulacion', PostulacionEstado::Postulada->value);
 
@@ -138,10 +150,10 @@ class SeleccionController extends Controller
         $visibles = $halladas->take(self::LIMITE_ATENCION);
         $conteos = $this->conteoCandidatos($visibles->map(fn (array $h) => $h[0]->id));
 
-        return response()->json([
-            'data' => $visibles->map(fn (array $h) => $this->presentarConvocatoria($h[0], $veCodigo, $conteos) + ['listos' => $h[1]])->values(),
+        return [
+            'data' => $visibles->map(fn (array $h) => $this->presentarConvocatoria($h[0], $veCodigo, $conteos) + ['listos' => $h[1]])->values()->all(),
             'meta' => ['limite' => self::LIMITE_ATENCION, 'hay_mas' => $halladas->count() > self::LIMITE_ATENCION],
-        ]);
+        ];
     }
 
     /** Postulaciones en estado postulada por convocatoria, en UNA consulta agrupada (convocatoria_id => total). */
@@ -157,6 +169,7 @@ class SeleccionController extends Controller
             ->selectRaw('convocatoria_id, COUNT(*) AS total')
             ->whereIn('convocatoria_id', $convocatoriaIds)
             ->where('estado_id', $postulada->id)
+            ->whereHas('user', fn ($u) => $u->where('active', true))
             ->groupBy('convocatoria_id')
             ->pluck('total', 'convocatoria_id');
     }
@@ -189,6 +202,7 @@ class SeleccionController extends Controller
             ->with('user:id,name')
             ->where('convocatoria_id', $convocatoria->id)
             ->where('estado_id', $postulada->id)
+            ->whereHas('user', fn ($u) => $u->where('active', true))
             ->orderBy('id')
             ->paginate(self::POR_PAGINA);
 

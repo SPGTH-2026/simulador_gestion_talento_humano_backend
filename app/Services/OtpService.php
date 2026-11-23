@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Mail\OtpMail;
 use App\Models\EmailOtp;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -87,6 +88,10 @@ class OtpService
                 'error' => $e->getMessage(),
             ]);
 
+            // Un código que nunca llegó al correo no debe bloquear el reintento: sin esto, el registro de la ráfaga
+            // respondía «enviado» durante IDEMPOTENCY_SECONDS sin mandar nada.
+            $this->clear($email, $purpose);
+
             return false;
         }
 
@@ -101,21 +106,28 @@ class OtpService
     /** Comprueba el código. Si es correcto lo consume (un solo uso). */
     public function verify(string $email, string $purpose, string $code): bool
     {
-        $otp = EmailOtp::where('email', $email)->where('purpose', $purpose)->first();
+        // Dentro de una transacción con la fila bloqueada: peticiones concurrentes no leen el mismo número de intentos
+        // y no pueden superar MAX_ATTEMPTS. La comparación se hace con el bloqueo tomado.
+        return DB::transaction(function () use ($email, $purpose, $code) {
+            $otp = EmailOtp::where('email', $email)
+                ->where('purpose', $purpose)
+                ->lockForUpdate()
+                ->first();
 
-        if (! $otp || ! $otp->isUsable()) {
-            return false;
-        }
+            if (! $otp || ! $otp->isUsable()) {
+                return false;
+            }
 
-        if (! Hash::check($code, $otp->code_hash)) {
-            $this->registerFailedAttempt($otp);
+            if (! Hash::check($code, $otp->code_hash)) {
+                $this->registerFailedAttempt($otp);
 
-            return false;
-        }
+                return false;
+            }
 
-        $otp->update(['consumed_at' => now()]);
+            $otp->update(['consumed_at' => now()]);
 
-        return true;
+            return true;
+        });
     }
 
     public function clear(string $email, string $purpose): void

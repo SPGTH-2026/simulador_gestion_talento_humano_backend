@@ -66,6 +66,7 @@ class ComparacionSeleccionController extends Controller
         $postulaciones = Postulacion::query()
             ->with('user:id,name')
             ->where('convocatoria_id', $convocatoria->id)
+            ->whereHas('user', fn ($u) => $u->where('active', true))
             ->whereIn('id', $ids)
             ->get(['id', 'user_id', 'fecha_postulacion'])
             ->keyBy('id');
