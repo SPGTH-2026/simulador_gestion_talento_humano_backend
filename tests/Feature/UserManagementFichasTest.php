@@ -64,8 +64,9 @@ class UserManagementFichasTest extends TestCase
         }
     }
 
-    public function test_instructor_incorpora_aspirante_sin_ficha_a_ficha_propia(): void
+    public function test_instructor_no_ve_ni_toca_aspirante_sin_ficha(): void
     {
+        // Un aspirante sin ficha no puede existir: no aparece en la lista de ningún instructor ni se le puede asignar.
         [$a, , $fichaA] = $this->dosInstructores();
         $libre = $this->usuario(Role::Aspirante);
 
@@ -74,9 +75,9 @@ class UserManagementFichasTest extends TestCase
             'subrole' => 'general',
             'active' => true,
             'ficha_id' => $fichaA->id,
-        ])->assertOk();
+        ])->assertNotFound();
 
-        $this->assertSame($fichaA->id, $libre->fresh()->ficha_id);
+        $this->assertNull($libre->fresh()->ficha_id);
     }
 
     public function test_instructor_sigue_gestionando_aspirantes_de_su_ficha(): void

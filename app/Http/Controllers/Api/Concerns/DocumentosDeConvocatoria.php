@@ -49,10 +49,12 @@ trait DocumentosDeConvocatoria
             $parametro = null;
 
             if (is_int($referencia)) {
+                // Un documento creado por otra ficha no es válido aquí, igual que si no existiera.
                 $parametro = Parametro::query()
                     ->whereKey($referencia)
                     ->whereHas('tema', fn ($q) => $q->where('codigo', 'tipo_documento'))
                     ->where('activo', true)
+                    ->when(request()->user(), fn ($q, $usuario) => $q->visiblesPara($usuario))
                     ->first();
             } elseif (is_string($referencia) && $referencia !== '') {
                 $parametro = Parametro::porTemaYCodigo('tipo_documento', $referencia);

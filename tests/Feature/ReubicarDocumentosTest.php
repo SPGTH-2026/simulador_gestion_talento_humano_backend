@@ -93,7 +93,7 @@ class ReubicarDocumentosTest extends TestCase
         $this->artisan('documentos:reubicar')->assertSuccessful();
 
         $this->assertSame("postulaciones/{$postulacion->id}/adicionales/a.pdf", $documento->fresh()->ruta);
-        Storage::disk('local')->assertMissing("fichas/{$ficha->id}/usuarios/{$postulacion->user_id}/postulaciones/{$postulacion->id}/adicionales/a.pdf");
+        Storage::disk('local')->assertMissing("fichas/{$ficha->codigo}/usuarios/{$postulacion->user_id}/postulaciones/{$postulacion->id}/adicionales/a.pdf");
     }
 
     public function test_con_ejecutar_copia_verifica_y_actualiza_la_ruta_sin_borrar_el_original(): void
@@ -104,7 +104,7 @@ class ReubicarDocumentosTest extends TestCase
 
         $this->artisan('documentos:reubicar', ['--ejecutar' => true])->assertSuccessful();
 
-        $nueva = "fichas/{$ficha->id}/usuarios/{$aspirante->id}/postulaciones/{$postulacion->id}/adicionales/a.pdf";
+        $nueva = "fichas/{$ficha->codigo}/usuarios/{$aspirante->id}/postulaciones/{$postulacion->id}/adicionales/a.pdf";
         $this->assertSame($nueva, $documento->fresh()->ruta);
         Storage::disk('local')->assertExists($nueva);
         Storage::disk('local')->assertExists($viejo);
@@ -129,7 +129,7 @@ class ReubicarDocumentosTest extends TestCase
         $this->artisan('documentos:reubicar', ['--ejecutar' => true])->assertSuccessful();
 
         $this->assertStringStartsWith(
-            "fichas/{$ficha->id}/usuarios/{$aspirante->id}/postulaciones/{$postulacion->id}/documentos/",
+            "fichas/{$ficha->codigo}/usuarios/{$aspirante->id}/postulaciones/{$postulacion->id}/documentos/",
             $documento->fresh()->ruta,
         );
     }
@@ -185,7 +185,7 @@ class ReubicarDocumentosTest extends TestCase
         $this->artisan('documentos:reubicar', ['--ejecutar' => true])->assertSuccessful();
 
         $this->assertStringStartsWith(
-            "fichas/{$ficha->id}/usuarios/{$aspirante->id}/postulaciones/{$postulacion->id}/skills/",
+            "fichas/{$ficha->codigo}/usuarios/{$aspirante->id}/postulaciones/{$postulacion->id}/skills/",
             $skill->fresh()->certificado_ruta,
         );
     }

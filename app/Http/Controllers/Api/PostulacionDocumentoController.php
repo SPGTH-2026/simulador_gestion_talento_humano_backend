@@ -3,43 +3,44 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Api\Concerns\GestionaPostulacionPropia;
-use App\Http\Controllers\Api\Concerns\GestionaArchivosDocumentos;
 use App\Http\Controllers\Api\Concerns\IdentificadorConvocatoria;
+use App\Http\Controllers\Api\Concerns\PresentaDocumentos;
 use App\Http\Controllers\Controller;
-use App\Models\PerfilAspirante;
+use App\Models\Parametro;
 use App\Models\Postulacion;
 use App\Models\PostulacionDocumento;
+use App\Services\Documentos\AlmacenArchivos;
+use App\Services\Documentos\EscribeDocumentoPostulacion;
 use App\Services\DocumentosDePostulacion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
-use App\Http\Controllers\Api\Concerns\PresentaDocumentos;
-use App\Http\Controllers\Api\Concerns\GuardaDocumentos;
 
 /**
  * Paso de documentos de una postulación.
  *
- * - El aspirante dueño ve el estado, sube/reemplaza, borra y descarga sus
- *   documentos y adicionales. Una postulación ajena o inexistente -> 404.
- * - Solo se edita con la convocatoria publicada y dentro de la ventana, y con la
- *   postulación en 'borrador' (antes de enviar) o 'postulada' (después). Una
- *   'retirada' también es editable mientras la ventana esté abierta.
- * - El envío (PostulacionController::enviar) exige los obligatorios completos;
- *   aquí el campo `completo` se calcula con DocumentosDePostulacion, la misma
- *   regla que valida el envío.
- * - Los revisores (permiso 'documentos:ver') pueden LEER y descargar ajenos,
- *   respetando el alcance por ficha. Un borrador no entra a revisión (404).
+ * Este controlador solo hace la parte HTTP: valida la entrada, comprueba el acceso y responde. La escritura (reglas,
+ * transacciones, invalidación de evaluaciones) está en EscribeDocumentoPostulacion; el disco, en AlmacenArchivos.
+ *
+ * - El aspirante dueño ve el estado, sube/reemplaza, borra y descarga sus documentos y adicionales. Una postulación ajena
+ *   o inexistente -> 404.
+ * - Solo se edita con la convocatoria publicada y dentro de la ventana, y con la postulación en 'borrador' (antes de
+ *   enviar) o 'postulada' (después). Una 'retirada' también es editable mientras la ventana esté abierta.
+ * - El envío (PostulacionController::enviar) exige los obligatorios completos; aquí el campo `completo` se calcula con
+ *   DocumentosDePostulacion, la misma regla que valida el envío.
+ * - Los revisores (permiso 'documentos:ver') pueden LEER y descargar ajenos, respetando el alcance por ficha. Un borrador
+ *   no entra a revisión (404).
  */
 class PostulacionDocumentoController extends Controller
 {
-    use GuardaDocumentos;
-
+    use GestionaPostulacionPropia;
+    use IdentificadorConvocatoria;
     use PresentaDocumentos;
 
-    use GestionaPostulacionPropia;
-    use GestionaArchivosDocumentos;
-    use IdentificadorConvocatoria;
+    public function __construct(
+        private AlmacenArchivos $almacen,
+        private EscribeDocumentoPostulacion $escribe,
+    ) {}
 
     /** Estado de documentos de MI postulación (dueño). */
     public function show(Request $request, Postulacion $postulacion, DocumentosDePostulacion $documentos): JsonResponse
@@ -62,15 +63,40 @@ class PostulacionDocumentoController extends Controller
     }
 
     /**
-     * Sube o REEMPLAZA un documento requerido por la convocatoria. 201 si es
-     * nuevo; 200 si reemplaza el existente. El tipo se resuelve por CÓDIGO.
+     * Sube o REEMPLAZA un documento requerido por la convocatoria. 201 si es nuevo; 200 si reemplaza el existente. El tipo
+     * se resuelve por CÓDIGO (documentos de sistema) o por ID (documentos creados por el gestor).
      */
     public function store(Request $request, Postulacion $postulacion): JsonResponse
     {
         $this->exigirPropia($request, $postulacion);
         $this->exigirEditable($postulacion, 'documentos');
 
-        return $this->guardarRequerido($request, $postulacion);
+        $datos = $request->validate([
+            'codigo' => ['nullable', 'string', 'required_without:parametro_id'],
+            'parametro_id' => ['nullable', 'integer', 'required_without:codigo'],
+            'archivo' => $this->almacen->reglas(),
+        ], $this->mensajes(), $this->atributos());
+
+        // Un documento del catálogo puede identificarse por código (documentos de sistema) o por id (documentos NUEVOS
+        // creados por el gestor, que nacen sin código). Se resuelve por código solo si vino.
+        $campo = empty($datos['parametro_id']) ? 'codigo' : 'parametro_id';
+
+        $parametro = empty($datos['parametro_id'])
+            ? Parametro::porTemaYCodigo('tipo_documento', $datos['codigo'])
+            : Parametro::query()
+                ->whereKey($datos['parametro_id'])
+                ->whereHas('tema', fn ($q) => $q->where('codigo', 'tipo_documento'))
+                ->first();
+
+        [$documento, $codigoHttp] = $this->escribe->guardarRequerido(
+            $postulacion,
+            $parametro,
+            $campo,
+            $request->file('archivo'),
+            $this->correccionVigente($postulacion),
+        );
+
+        return response()->json(['data' => $this->archivoResumen($documento)], $codigoHttp);
     }
 
     /** Sube un documento ADICIONAL ("tipo otro"): título obligatorio, nota opcional, máx. config. */
@@ -80,7 +106,16 @@ class PostulacionDocumentoController extends Controller
         $this->exigirEditable($postulacion, 'documentos');
         $this->exigirSinCorreccionVigente($postulacion);
 
-        return $this->guardarAdicional($request, $postulacion);
+        $datos = $request->validate([
+            'documento_id' => ['nullable', 'integer'],
+            'titulo' => ['required', 'string', 'max:'.config('convocatorias.titulo_adicional_max_longitud')],
+            'nota' => ['nullable', 'string', 'max:'.config('convocatorias.nota_adicional_max_longitud')],
+            'archivo' => $this->almacen->reglas(),
+        ], $this->mensajes(), $this->atributos());
+
+        [$documento, $codigoHttp] = $this->escribe->guardarAdicional($postulacion, $datos, $request->file('archivo'));
+
+        return response()->json(['data' => $this->adicionalResumen($documento)], $codigoHttp);
     }
 
     /** Borra un documento (requerido o adicional) de MI postulación. */
@@ -90,9 +125,8 @@ class PostulacionDocumentoController extends Controller
         $this->exigirDocumentoDeLaPostulacion($postulacion, $documento);
         $this->exigirEditable($postulacion, 'documentos');
         $this->exigirSinCorreccionVigente($postulacion);
-        $this->exigirQueNoSeaObligatorio($postulacion, $documento);
 
-        $this->eliminarDocumento($documento);
+        $this->escribe->eliminar($documento);
 
         return response()->json(null, 204);
     }
@@ -113,52 +147,24 @@ class PostulacionDocumentoController extends Controller
         return $this->descargar($postulacion, $documento, $request->boolean('inline'));
     }
 
-    // ── Escritura compartida (dueño y gestor documental) ────────────────
-
-    // ── Reglas de acceso ───────────────────────────────────────────────
-
-    /** La libreta militar solo aplica a hombres, y exige tener el sexo registrado. */
-    private function exigirLibretaAplicable(Postulacion $postulacion): void
-    {
-        $perfil = PerfilAspirante::query()
-            ->where('user_id', $postulacion->user_id)
-            ->with('sexo')
-            ->first();
-
-        if (! $perfil) {
-            throw ValidationException::withMessages([
-                'codigo' => 'Antes de subir la libreta militar debes indicar tu sexo.',
-            ]);
-        }
-
-        if ($perfil->sexo?->codigo === 'mujer') {
-            throw ValidationException::withMessages([
-                'codigo' => 'La libreta militar no aplica: tu perfil está registrado como femenino.',
-            ]);
-        }
-    }
-
-    private function convocatoriaPide(Postulacion $postulacion, int $parametroId): bool
-    {
-        $postulacion->loadMissing('convocatoria.documentos');
-
-        return $postulacion->convocatoria->documentos->contains('id', $parametroId);
-    }
-
     private function esEditable(Postulacion $postulacion): bool
     {
         return $this->puedeEditar($postulacion) || $this->correccionVigente($postulacion) !== null;
     }
 
-    // ── Archivos ───────────────────────────────────────────────────────
+    private function exigirDocumentoDeLaPostulacion(Postulacion $postulacion, PostulacionDocumento $documento): void
+    {
+        if ($documento->postulacion_id !== $postulacion->id) {
+            abort(404, 'Documento no encontrado.');
+        }
+    }
 
     private function descargar(Postulacion $postulacion, PostulacionDocumento $documento, bool $inline = false): Response
     {
         $this->exigirDocumentoDeLaPostulacion($postulacion, $documento);
 
-        // inline: el navegador lo muestra en la pestaña (Visor PDF del front).
-        // attachment: descarga clásica, el comportamiento histórico.
-        return $this->leerArchivo(
+        // inline: el navegador lo muestra en la pestaña (Visor PDF del front). attachment: descarga clásica.
+        return $this->almacen->leer(
             $documento->disco,
             $documento->ruta,
             $documento->nombre_original,
@@ -166,9 +172,4 @@ class PostulacionDocumentoController extends Controller
             $inline,
         );
     }
-
-    // ── Presentación ───────────────────────────────────────────────────
-
-    // ── Mensajes en español ────────────────────────────────────────────
-
 }

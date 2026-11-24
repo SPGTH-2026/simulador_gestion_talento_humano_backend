@@ -39,7 +39,7 @@ class PostulacionAspiranteReglasTest extends TestCase
             ->assertJsonPath('message', 'Convocatoria no encontrada.');
     }
 
-    public function test_aspirante_sin_ficha_no_puede_postularse_devuelve_404(): void
+    public function test_aspirante_sin_ficha_no_puede_postularse_devuelve_403(): void
     {
         $ficha = $this->ficha();
         $instructor = $this->instructor($ficha);
@@ -48,7 +48,8 @@ class PostulacionAspiranteReglasTest extends TestCase
 
         $this->actingAs($aspiranteSinFicha)
             ->postJson("/api/convocatorias/{$convocatoria->id}/postulaciones")
-            ->assertNotFound();
+            ->assertForbidden()
+            ->assertJsonPath('code', 'ficha_requerida');
     }
 
     // ── Documentos (no se exigen al crear el borrador) ─────────────────

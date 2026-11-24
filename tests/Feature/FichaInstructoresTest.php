@@ -34,8 +34,11 @@ class FichaInstructoresTest extends TestCase
     public function test_el_super_admin_quita_un_instructor_de_la_ficha(): void
     {
         $ficha = $this->ficha('3173334');
+        $otra = $this->ficha('3173335');
         $instructor = $this->usuario(Role::Instructor);
         $ficha->instructores()->attach($instructor->id);
+        // El instructor debe quedar en otra ficha: quitarlo de esta no lo deja sin ficha.
+        $otra->instructores()->attach($instructor->id);
 
         $this->actingAs($this->superAdmin())
             ->deleteJson("/api/fichas/{$ficha->id}/instructores", ['usuario_id' => $instructor->id])
@@ -69,4 +72,18 @@ class FichaInstructoresTest extends TestCase
             ->assertJsonValidationErrors('usuario_id');
     }
 
+
+    public function test_no_quita_al_instructor_de_su_unica_ficha(): void
+    {
+        $ficha = $this->ficha('3173334');
+        $instructor = $this->usuario(Role::Instructor);
+        $ficha->instructores()->attach($instructor->id);
+
+        $this->actingAs($this->superAdmin())
+            ->deleteJson("/api/fichas/{$ficha->id}/instructores", ['usuario_id' => $instructor->id])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('usuario_id');
+
+        $this->assertDatabaseHas('ficha_instructor', ['ficha_id' => $ficha->id, 'usuario_id' => $instructor->id]);
+    }
 }

@@ -165,13 +165,13 @@ class InhabilitarUsuarioTest extends TestCase
         $ficha = $this->ficha();
         $aspirante = $this->usuario(Role::Aspirante, [
             'ficha_id' => $ficha->id,
-            'password' => 'Dev12345',
+            'password' => $this->clavePrueba(),
             'active' => false,
         ]);
 
         $this->postJson('/api/auth/login', [
             'email' => $aspirante->email,
-            'password' => 'Dev12345',
+            'password' => $this->clavePrueba(),
         ])->assertUnprocessable();
     }
 }

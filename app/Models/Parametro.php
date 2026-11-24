@@ -2,9 +2,11 @@
 
 namespace App\Models;
 
+use App\Enums\Role;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Parametro extends Model
 {
@@ -19,7 +21,31 @@ class Parametro extends Model
     public const DOC_LIBRETA_MILITAR = 'libreta_militar';
     public const DOC_TARJETA_PROFESIONAL = 'tarjeta_profesional';
 
-    protected $fillable = ['tema_id', 'codigo', 'nombre', 'orden', 'activo', 'es_sistema', 'es_defecto'];
+    protected $fillable = ['tema_id', 'codigo', 'nombre', 'orden', 'activo', 'es_sistema', 'es_defecto', 'creado_por'];
+
+    /** Fichas a las que pertenece un documento creado por un gestor. Sin filas = documento global (sistema o anterior). */
+    public function fichas(): BelongsToMany
+    {
+        return $this->belongsToMany(Ficha::class, 'parametro_fichas', 'parametro_id', 'ficha_id');
+    }
+
+    /**
+     * Parámetros que `$usuario` puede ver. Los globales (de sistema o creados antes del aislamiento: sin creador y sin
+     * fichas) los ve cualquiera; un documento creado por un gestor solo lo ven su creador y quienes comparten alguna de
+     * sus fichas. El super admin ve todo.
+     */
+    public function scopeVisiblesPara(Builder $query, User $usuario): Builder
+    {
+        if ($usuario->role === Role::SuperAdmin) {
+            return $query;
+        }
+
+        return $query->where(function (Builder $w) use ($usuario) {
+            $w->where(fn (Builder $global) => $global->whereNull('creado_por')->whereDoesntHave('fichas'))
+                ->orWhere('creado_por', $usuario->id)
+                ->orWhereHas('fichas', fn (Builder $f) => $f->whereIn('fichas.id', $usuario->fichaIds()));
+        });
+    }
 
     protected function casts(): array
     {

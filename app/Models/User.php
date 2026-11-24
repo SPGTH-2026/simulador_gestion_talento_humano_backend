@@ -121,12 +121,8 @@ class User extends Authenticatable implements MustVerifyEmail
             return $query;
         }
 
-        return $query->where(function (Builder $q) use ($actor) {
-            $q->whereIn('ficha_id', $actor->fichaIds())
-                ->orWhere(fn (Builder $libre) => $libre
-                    ->where('role', Role::Aspirante->value)
-                    ->whereNull('ficha_id'));
-        });
+        // Solo las personas de una ficha del actor: un aspirante sin ficha no existe para los gestores (la ficha es obligatoria).
+        return $query->whereIn('ficha_id', $actor->fichaIds());
     }
 
     /** @return string[] */

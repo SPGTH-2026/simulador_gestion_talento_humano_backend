@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Enums\ConvocatoriaEstado;
 use App\Models\Convocatoria;
 use App\Models\Parametro;
+use App\Services\Notificaciones\Avisos;
 use Illuminate\Console\Command;
 
 /**
@@ -66,6 +67,7 @@ class CerrarConvocatoriasVencidas extends Command
 
             if (! $dryRun) {
                 $convocatoria->forceFill(['estado_id' => $enProcesoId])->save();
+                app(Avisos::class)->convocatoriaCambio($convocatoria, ConvocatoriaEstado::EnProceso);
             }
         }
 

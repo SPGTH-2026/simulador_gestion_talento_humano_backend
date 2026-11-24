@@ -1,23 +1,26 @@
 <?php
 
-namespace App\Http\Controllers\Api\Concerns;
+namespace App\Services\Documentos;
 
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\HeaderUtils;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Archivos de los documentos y skills de una postulación: validación del PDF, guardado en el disco configurado,
- * lectura en línea o descarga, y borrado. Lo usan los controladores de documentos y de skills.
+ * Archivos de los documentos y de los certificados de skills: reglas de validación, guardado en el disco de documentos,
+ * entrega al navegador y borrado.
+ *
+ * No depende de ningún controlador ni de ninguna regla de negocio: lo usan los controladores de documentos y de skills
+ * mediante inyección de dependencias.
  */
-trait GestionaArchivosDocumentos
+final class AlmacenArchivos
 {
-
-    /** @return array<int, string> Reglas para un archivo adjunto (PDF <= config). */
-    private function reglasArchivo(): array
+    /** Reglas de un archivo adjunto: PDF no mayor que el tamaño configurado. */
+    public function reglas(): array
     {
         $maxKb = (int) config('convocatorias.tamano_maximo_mb') * 1024;
 
@@ -27,13 +30,12 @@ trait GestionaArchivosDocumentos
     /**
      * Guarda el archivo en el disco configurado (documentos_disk) y devuelve sus metadatos.
      *
-     * Si el disco falla (credenciales, bucket, red) NO se sigue como si nada:
-     * un fallo silencioso deja la fila con 'ruta' vacía y el documento se
-     * pierde en silencio. Se corta con un 422 en español.
+     * Si el disco falla (credenciales, bucket, red) NO se sigue como si nada: un fallo silencioso deja la fila con 'ruta'
+     * vacía y el documento se pierde en silencio. Se corta con un 422 en español.
      *
      * @return array{nombre_original: string, ruta: string, disco: string, mime: string, tamano_bytes: int}
      */
-    private function guardarArchivo(UploadedFile $archivo, string $carpeta): array
+    public function guardar(UploadedFile $archivo, string $carpeta): array
     {
         $disco = (string) config('filesystems.documentos_disk');
 
@@ -67,13 +69,11 @@ trait GestionaArchivosDocumentos
     /**
      * Entrega un archivo del disco al navegador.
      *
-     * Se lee EN MEMORIA y se devuelve como respuesta normal, no como
-     * StreamedResponse, a propósito: si el disco falla (credenciales de R2,
-     * bucket, red) el error ocurre ANTES de enviar cabeceras y se puede
-     * convertir en un 503 limpio. Con un stream el fallo ocurre a mitad de la
-     * respuesta y el usuario se queda con un PDF truncado y un 200.
+     * Se lee EN MEMORIA y se devuelve como respuesta normal, no como StreamedResponse, a propósito: si el disco falla
+     * (credenciales de R2, bucket, red) el error ocurre ANTES de enviar cabeceras y se puede convertir en un 503 limpio.
+     * Con un stream el fallo ocurre a mitad de la respuesta y el usuario se queda con un PDF truncado y un 200.
      */
-    private function leerArchivo(
+    public function leer(
         ?string $disco,
         ?string $ruta,
         ?string $nombre,
@@ -81,7 +81,7 @@ trait GestionaArchivosDocumentos
         bool $inline = false,
         string $mensajeNoEncontrado = 'Documento no encontrado.',
     ): Response {
-        $discoReal = $this->discoDeDocumentos($disco);
+        $discoReal = $this->discoReal($disco);
 
         if ($ruta === null || $ruta === '') {
             abort(404, $mensajeNoEncontrado);
@@ -119,7 +119,7 @@ trait GestionaArchivosDocumentos
             abort(404, $mensajeNoEncontrado);
         }
 
-        $nombre = $this->nombreDeArchivo($nombre);
+        $nombre = $this->nombreLimpio($nombre);
 
         return response($contenido, 200, [
             'Content-Type' => $mime ?: 'application/pdf',
@@ -135,13 +135,26 @@ trait GestionaArchivosDocumentos
         ]);
     }
 
+    /** Borra el archivo físico; un fallo aquí no rompe la operación de negocio. */
+    public function borrar(?string $disco, ?string $ruta): void
+    {
+        if ($disco === null || $ruta === null) {
+            return;
+        }
+
+        try {
+            Storage::disk($this->discoReal($disco))->delete($ruta);
+        } catch (\Throwable) {
+            // Ignorado a propósito: el registro ya se actualizó y el archivo huérfano no afecta al usuario.
+        }
+    }
+
     /**
-     * Disco real de un archivo guardado. Si la fila apunta a un disco que no
-     * está configurado en este servidor (por ejemplo, una fila vieja con
-     * 's3' cuando el despliegue usa R2), se cae al disco de documentos por
-     * defecto y se deja rastro en el log.
+     * Disco real de un archivo guardado. Si la fila apunta a un disco que no está configurado en este servidor (por
+     * ejemplo, una fila vieja con 's3' cuando el despliegue usa R2), se cae al disco de documentos por defecto y se deja
+     * rastro en el log.
      */
-    private function discoDeDocumentos(?string $disco): string
+    private function discoReal(?string $disco): string
     {
         $porDefecto = (string) config('filesystems.documentos_disk');
         $configurados = array_keys((array) config('filesystems.disks', []));
@@ -161,26 +174,12 @@ trait GestionaArchivosDocumentos
     }
 
     /** Nombre de archivo limpio para la cabecera Content-Disposition. */
-    private function nombreDeArchivo(?string $nombre): string
+    private function nombreLimpio(?string $nombre): string
     {
         $limpio = basename((string) $nombre);
         $limpio = (string) preg_replace('/[\x00-\x1F\x7F"\\\\]/u', '', $limpio);
         $limpio = trim($limpio);
 
         return $limpio !== '' ? $limpio : 'documento.pdf';
-    }
-
-    /** Borra el archivo físico; un fallo aquí no rompe la operación de negocio. */
-    private function borrarArchivo(?string $disco, ?string $ruta): void
-    {
-        if ($disco === null || $ruta === null) {
-            return;
-        }
-
-        try {
-            Storage::disk($this->discoDeDocumentos($disco))->delete($ruta);
-        } catch (\Throwable) {
-            // Ignorado a propósito.
-        }
     }
 }
