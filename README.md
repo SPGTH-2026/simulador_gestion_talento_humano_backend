@@ -120,8 +120,8 @@ Cuatro cosas que no son obvias, y que sí están documentadas en detalle:
 
 ## Cuentas de prueba
 
-`php artisan migrate --seed` crea 8 cuentas. La contraseña sale de `SEED_PASSWORD`, y por
-defecto es `Dev12345`.
+`php artisan migrate --seed` crea 8 cuentas. La contraseña sale de `SEED_PASSWORD`. Si no la
+defines, se genera una y se muestra una vez en la consola: no hay contraseña fija en el código.
 
 | Correo | Rol | Subrol |
 |---|---|---|

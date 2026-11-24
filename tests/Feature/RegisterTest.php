@@ -29,7 +29,7 @@ class RegisterTest extends TestCase
         $response = $this->postJson('/api/auth/register', [
             'name' => 'Nuevo Aspirante',
             'email' => 'nuevo@test.com',
-            'password' => 'Clave12345',
+            'password' => $this->clavePrueba(),
             'ficha_codigo' => $ficha->codigo,
         ]);
 
@@ -43,7 +43,7 @@ class RegisterTest extends TestCase
         $user = User::where('email', 'nuevo@test.com')->first();
         $this->assertNotNull($user);
         $this->assertTrue($user->active);
-        $this->assertTrue(Hash::check('Clave12345', $user->password));
+        $this->assertTrue(Hash::check($this->clavePrueba(), $user->password));
 
         // El registro abre sesión: así el front cae en /verificar-correo (OTP)
         // sin pasar por el login.
@@ -55,7 +55,7 @@ class RegisterTest extends TestCase
         $this->postJson('/api/auth/register', [
             'name' => 'Sin Ficha',
             'email' => 'sinficha@test.com',
-            'password' => 'Clave12345',
+            'password' => $this->clavePrueba(),
         ])->assertStatus(422)->assertJsonValidationErrors('ficha_codigo');
 
         $this->assertDatabaseMissing('users', ['email' => 'sinficha@test.com']);
@@ -68,7 +68,7 @@ class RegisterTest extends TestCase
         $this->postJson('/api/auth/register', [
             'name' => 'Otro',
             'email' => 'repetido@test.com',
-            'password' => 'Clave12345',
+            'password' => $this->clavePrueba(),
             'ficha_codigo' => '3173334',
         ])->assertStatus(422)->assertJsonValidationErrors('email');
     }

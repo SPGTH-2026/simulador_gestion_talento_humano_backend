@@ -22,9 +22,12 @@ class DatabaseSeeder extends Seeder
             return;
         }
 
-        // Contraseña solo para desarrollo. Se puede cambiar con SEED_PASSWORD en el .env local.
-        // No hace falta Hash::make: el cast 'password' => 'hashed' del modelo la hashea solo.
-        $password = env('SEED_PASSWORD', 'Dev12345');
+        // Contraseña de las cuentas de desarrollo. Nunca va en el código: se toma de SEED_PASSWORD; si no existe, se genera
+        // y se muestra una vez en la consola. No hace falta Hash::make: el cast 'password' => 'hashed' del modelo la hashea.
+        $password = env('SEED_PASSWORD') ?: \Illuminate\Support\Str::password(16);
+        if (! env('SEED_PASSWORD')) {
+            $this->command?->warn("Contraseña generada para las cuentas de desarrollo: {$password}");
+        }
 
         $usuarios = [
             [

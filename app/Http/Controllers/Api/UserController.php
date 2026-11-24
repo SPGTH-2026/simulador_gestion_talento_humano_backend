@@ -133,6 +133,14 @@ class UserController extends Controller
             throw ValidationException::withMessages(['role' => 'No puedes modificar tu propio usuario']);
         }
 
+        // Solo existe un super admin (la cuenta de SUPER_ADMIN_EMAIL). No se crea ni se modifica desde la aplicación.
+        if ($user->role === Role::SuperAdmin) {
+            throw ValidationException::withMessages(['role' => 'La cuenta de super admin no se modifica desde la aplicación']);
+        }
+        if ($datos['role'] === Role::SuperAdmin->value) {
+            throw ValidationException::withMessages(['role' => 'El rol super admin no se asigna desde la aplicación: solo existe una cuenta']);
+        }
+
         // 'nullable' valida pero no incluye la clave en $datos si el request no la manda.
         $subrole = $datos['subrole'] ?? null;
         $fichaId = $datos['ficha_id'] ?? null;

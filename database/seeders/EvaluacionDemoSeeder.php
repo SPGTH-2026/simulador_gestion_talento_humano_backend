@@ -30,7 +30,11 @@ class EvaluacionDemoSeeder extends Seeder
             return;
         }
 
-        $password = env('SEED_PASSWORD', 'Dev12345');
+        // Misma contraseña que DatabaseSeeder: SEED_PASSWORD, o una generada y mostrada una vez.
+        $password = env('SEED_PASSWORD') ?: \Illuminate\Support\Str::password(16);
+        if (! env('SEED_PASSWORD')) {
+            $this->command?->warn("Contraseña generada para las cuentas de desarrollo: {$password}");
+        }
 
         $aspirantes = [];
 
