@@ -9,6 +9,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreConvocatoriaRequest;
 use App\Models\Convocatoria;
 use App\Models\Ficha;
+use App\Services\Notificaciones\Avisos;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -278,6 +279,8 @@ class ConvocatoriaController extends Controller
         $convocatoria->forceFill([
             'estado_id' => $this->parametroId('estado_convocatoria', $destino),
         ])->save();
+
+        app(Avisos::class)->convocatoriaCambio($convocatoria, ConvocatoriaEstado::from($destino));
 
         $convocatoria->load($this->relaciones());
         $this->cargarCamposDePostulacion($convocatoria, $request->user());

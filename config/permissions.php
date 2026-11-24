@@ -27,14 +27,14 @@ return [
             'dashboard:ver', 'convocatorias:ver', 'convocatorias:gestionar',
             'documentos:ver',
             'evaluacion:ver', 'evaluacion:evaluar', 'seleccion:ver', 'seleccion:decidir', 'reportes:ver',
-            'propio:evaluaciones',
+            'propio:evaluaciones', 'propio:notificaciones',
         ],
         'evaluador' => [
             'dashboard:ver', 'documentos:ver', 'evaluacion:ver', 'evaluacion:evaluar', 'reportes:ver',
-            'propio:evaluaciones',
+            'propio:evaluaciones', 'propio:notificaciones',
         ],
-        'seleccionador' => ['dashboard:ver', 'seleccion:ver', 'seleccion:decidir', 'reportes:ver'],
-        'gestor_convocatorias' => ['dashboard:ver', 'convocatorias:ver', 'convocatorias:gestionar', 'reportes:ver'],
+        'seleccionador' => ['dashboard:ver', 'seleccion:ver', 'seleccion:decidir', 'reportes:ver', 'propio:notificaciones'],
+        'gestor_convocatorias' => ['dashboard:ver', 'convocatorias:ver', 'convocatorias:gestionar', 'reportes:ver', 'propio:notificaciones'],
     ],
     // El super admin recibe 'all'; el instructor recibe 'all' menos lo exclusivo
     // (ver User::permissions()).

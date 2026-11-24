@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\EvaluacionCorreccionController;
 use App\Http\Controllers\Api\EvaluacionListadoController;
 use App\Http\Controllers\Api\FichaController;
 use App\Http\Controllers\Api\FinalistasSeleccionController;
+use App\Http\Controllers\Api\NotificacionController;
 use App\Http\Controllers\Api\ParametroController;
 use App\Http\Controllers\Api\PerfilAspiranteController;
 use App\Http\Controllers\Api\PortafolioController;
@@ -136,6 +137,15 @@ Route::middleware(['auth:sanctum', 'verified', 'ficha'])->group(function () {
         ->whereNumber('postulacion')
         ->missing(fn () => abort(404, 'Postulación no encontrada.'))
         ->middleware('can:propio:postulaciones');
+
+    // ── Notificaciones (campana) ─────────────────────────────────────────
+    // Cada usuario ve solo las suyas: el controlador filtra por el autenticado.
+    Route::middleware('can:propio:notificaciones')->group(function () {
+        Route::get('notificaciones', [NotificacionController::class, 'index']);
+        Route::post('notificaciones/leer-todas', [NotificacionController::class, 'leerTodas']);
+        Route::post('notificaciones/{notificacion}/leer', [NotificacionController::class, 'leer'])
+            ->whereNumber('notificacion');
+    });
 
     // ── Documentos y skills de la postulación (Paso 4) ────────────────────
     // 'propio:documentos' lo tienen aspirante, instructor y super admin: cada
