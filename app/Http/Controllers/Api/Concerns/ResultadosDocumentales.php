@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Concerns;
 
+use App\Enums\Role;
 use App\Models\Convocatoria;
 use App\Models\Evaluacion;
 use App\Models\ReferenciaDocumental;
@@ -26,6 +27,15 @@ trait ResultadosDocumentales
         }
 
         return $convocatoria;
+    }
+
+    /**
+     * Quién ve el detalle de la referencia documental (designarla, saber si falta o quedó invalidada): solo Instructor y
+     * Superadministrador. seleccion:decidir lo tienen también aprendices, que reciben la explicación general.
+     */
+    protected function veDetalleDeReferencia(User $actor): bool
+    {
+        return in_array($actor->role, [Role::Instructor, Role::SuperAdmin], true);
     }
 
     /** Contrato de Evaluación: finalizada y con resultado definido. */

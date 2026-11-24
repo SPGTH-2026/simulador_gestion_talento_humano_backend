@@ -74,13 +74,29 @@ class DocumentosDePostulacion
     /**
      * Mismo cálculo y MISMA regla que completosPara (faltantesCon), para las postulaciones de UNA convocatoria ya
      * cargada: es lo que usa el Ranking para exigir los obligatorios aplicables. Siempre las mismas consultas, sin
-     * importar cuántas postulaciones haya: los archivos subidos de todas, los documentos de la convocatoria (una vez) y,
-     * solo si la convocatoria exige la libreta militar, los perfiles para saber a quién no le aplica.
+     * importar cuántas postulaciones haya.
      *
      * @param  EloquentCollection<int, Postulacion>  $postulaciones  postulaciones de $convocatoria
      * @return array<int, bool> mapa id de postulación => completo
      */
     public function completosDeConvocatoria(Convocatoria $convocatoria, EloquentCollection $postulaciones): array
+    {
+        return array_map(
+            fn (array $faltantes) => $faltantes === [],
+            $this->faltantesDeConvocatoria($convocatoria, $postulaciones),
+        );
+    }
+
+    /**
+     * Los obligatorios que faltan de cada postulación de UNA convocatoria, con la misma regla de faltantesCon y en un
+     * número fijo de consultas: los archivos subidos de todas (solo ids), los documentos de la convocatoria (una vez) y,
+     * solo si la convocatoria exige la libreta militar, los perfiles para saber a quién no le aplica. Solo viajan el
+     * código y el nombre del documento del catálogo: nunca archivos ni rutas.
+     *
+     * @param  EloquentCollection<int, Postulacion>  $postulaciones  postulaciones de $convocatoria
+     * @return array<int, array<int, array{codigo: string, nombre: string, motivo?: string}>> id de postulación => faltantes
+     */
+    public function faltantesDeConvocatoria(Convocatoria $convocatoria, EloquentCollection $postulaciones): array
     {
         if ($postulaciones->isEmpty()) {
             return [];
@@ -103,7 +119,7 @@ class DocumentosDePostulacion
         $resultado = [];
         foreach ($postulaciones as $postulacion) {
             $postulacion->setRelation('convocatoria', $convocatoria);
-            $resultado[$postulacion->id] = $this->faltantesCon($postulacion, $perfiles->get($postulacion->user_id)) === [];
+            $resultado[$postulacion->id] = $this->faltantesCon($postulacion, $perfiles->get($postulacion->user_id));
         }
 
         return $resultado;

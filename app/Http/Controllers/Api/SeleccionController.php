@@ -206,36 +206,26 @@ class SeleccionController extends Controller
             ->orderBy('id')
             ->paginate(self::POR_PAGINA);
 
-        // Una sola consulta agregada para toda la página, sin importar cuántos candidatos haya.
-        $ids = $pagina->getCollection()->pluck('id');
-
-        $resultados = $this->soloElegibles(Evaluacion::query()->whereIn('postulacion_id', $ids))
-            ->selectRaw('postulacion_id, COUNT(*) AS total, SUM(CASE WHEN pasa_seleccion THEN 1 ELSE 0 END) AS habilitadas, MAX(cumplimiento) AS cumplimiento')
-            ->groupBy('postulacion_id')
-            ->get()
-            ->keyBy('postulacion_id');
-
-        // Última designación de referencia y su vigencia, en bloque para la página.
-        $referencias = $this->ultimasReferencias($ids);
+        // La MISMA regla del Ranking (evaluarCandidatos), solo sobre la página y en un número fijo de consultas. Solo
+        // Instructor y Superadministrador, los únicos con acceso al detalle de la referencia, ven si falta designarla o si
+        // quedó invalidada; el resto recibe la explicación general. listo y bloqueos son aditivos: lo anterior no cambia.
+        $evaluados = $this->evaluarCandidatos(
+            $convocatoria,
+            $pagina->getCollection(),
+            $this->veDetalleDeReferencia($request->user()),
+        )['candidatos']->keyBy('id');
 
         return response()->json([
-            'data' => $pagina->getCollection()->map(function (Postulacion $p) use ($resultados, $referencias) {
-                $r = $resultados->get($p->id);
-                $referencia = $referencias->get($p->id);
-
-                [$estado, $cumplimiento] = $this->clasificarEstadoDocumental(
-                    (int) ($r->total ?? 0),
-                    (int) ($r->habilitadas ?? 0),
-                    isset($r->cumplimiento) ? (int) $r->cumplimiento : null,
-                    $referencia['ref'] ?? null,
-                    $referencia['vigente'] ?? false,
-                );
+            'data' => $pagina->getCollection()->map(function (Postulacion $p) use ($evaluados) {
+                $c = $evaluados->get($p->id);
 
                 return [
                     'id' => $p->id,
                     'aspirante' => $p->user->name,
-                    'estado_documental' => $estado,
-                    'cumplimiento' => $cumplimiento,
+                    'estado_documental' => $c['estado_documental'],
+                    'cumplimiento' => $c['cumplimiento_documental'],
+                    'listo' => $c['listo'],
+                    'bloqueos' => $c['bloqueos'],
                 ];
             })->values(),
             'meta' => $this->meta($pagina),

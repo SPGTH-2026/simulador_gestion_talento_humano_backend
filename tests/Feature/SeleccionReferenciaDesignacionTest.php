@@ -48,7 +48,7 @@ class SeleccionReferenciaDesignacionTest extends TestCase
 
         $fila = $this->fila($instructor, $convocatoria, $postulacion);
         $this->assertSame(['no_habilitado', 30], [$fila['estado_documental'], $fila['cumplimiento']]);
-        $this->assertSame(['id', 'aspirante', 'estado_documental', 'cumplimiento'], array_keys($fila));
+        $this->assertSame(['id', 'aspirante', 'estado_documental', 'cumplimiento'], array_slice(array_keys($fila), 0, 4));
 
         // También el seleccionador, que solo consulta, ve el resultado elegido.
         $seleccionador = $this->usuario(Role::Aprendiz, 'seleccionador', ['ficha_id' => $postulacion->convocatoria->ficha_id]);

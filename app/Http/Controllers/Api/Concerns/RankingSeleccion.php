@@ -38,7 +38,6 @@ trait RankingSeleccion
      */
     protected function construirRanking(Convocatoria $convocatoria): array
     {
-        $configuracion = SeleccionConfiguracion::query()->where('convocatoria_id', $convocatoria->id)->first();
         $postulada = Parametro::porTemaYCodigo('estado_postulacion', PostulacionEstado::Postulada->value);
 
         $postulaciones = Postulacion::query()
@@ -50,54 +49,9 @@ trait RankingSeleccion
             ->whereHas('user', fn ($u) => $u->where('active', true))
             ->orderBy('id')
             ->get();
-        $ids = $postulaciones->pluck('id');
 
-        $documentales = $this->estadosDocumentales($ids);
-        // Documentos obligatorios aplicables completos (misma regla que el envío), calculados en bloque para todas las
-        // postulaciones. Una postulación incompleta no es candidata lista aunque su evaluación diga «Cumple»: es el caso de
-        // las evaluaciones anteriores a RF-DOC-006, hechas cuando se podía eliminar un obligatorio.
-        $completas = app(DocumentosDePostulacion::class)->completosDeConvocatoria($convocatoria, $postulaciones);
-        $calificaciones = SeleccionCalificacion::query()
-            ->where('convocatoria_id', $convocatoria->id)
-            ->whereIn('postulacion_id', $ids)
-            ->get(['postulacion_id', 'actividad', 'nota', 'updated_at'])
-            ->groupBy('postulacion_id');
-
-        $modo = match (true) {
-            $configuracion === null => 'pendiente_de_configurar',
-            $configuracion->entrevista_activa || $configuracion->prueba_tecnica_activa => 'con_actividades',
-            default => 'sin_actividades',
-        };
-
-        $candidatos = $postulaciones->map(function (Postulacion $p) use ($documentales, $completas, $calificaciones, $configuracion, $modo) {
-            $doc = $documentales->get($p->id);
-            $notas = $calificaciones->get($p->id, collect())->keyBy('actividad');
-            $centesimas = $notas->map(fn ($n) => $this->centesimas((string) $n->nota))->all();
-
-            $resultado = $modo === 'con_actividades' ? $this->resultadoPonderado($configuracion, $centesimas) : null;
-            $completo = match ($modo) {
-                'con_actividades' => $resultado !== null,
-                'sin_actividades' => true,
-                default => false,
-            };
-            $documentosCompletos = $completas[$p->id] ?? false;
-            $listo = $doc['estado'] === 'habilitado' && $documentosCompletos && $completo;
-
-            return [
-                'id' => $p->id,
-                'aspirante' => $p->user->name,
-                'estado_documental' => $doc['estado'],
-                'cumplimiento_documental' => $doc['cumplimiento'],
-                'documentos_completos' => $documentosCompletos,
-                'resultado' => $resultado,
-                'listo' => $listo,
-                // Cambia si cambia la habilitación, la referencia, el resultado o cualquier nota (valor o fecha de edición).
-                'huella' => sha1(json_encode([
-                    $p->id, $doc['estado'], $doc['cumplimiento'], $doc['ref_id'], $doc['vigente'], $resultado,
-                    $notas->sortKeys()->map(fn ($n) => [$n->actividad, (string) $n->nota, $n->updated_at?->getTimestamp()])->values()->all(),
-                ])),
-            ];
-        })->values();
+        // Una sola regla de elegibilidad: la misma que explica los bloqueos en el listado de candidatos.
+        ['modo' => $modo, 'configuracion' => $configuracion, 'candidatos' => $candidatos] = $this->evaluarCandidatos($convocatoria, $postulaciones);
 
         // Orden de presentación: resultado de mayor a menor y, solo para presentar, por id.
         // El id nunca decide quién pasa: los empates comparten posición.
@@ -150,6 +104,100 @@ trait RankingSeleccion
                 $listos->pluck('huella')->all(),
             ])),
         ];
+    }
+
+    /**
+     * LA regla de elegibilidad de Selección, compartida por el Ranking y por el listado de candidatos.
+     *
+     * Para las postulaciones dadas (todas de la convocatoria y en estado postulada) calcula, en un número fijo de consultas,
+     * qué le impide a cada una estar lista. «Listo» es exactamente «sin bloqueos»: nadie puede ser listo con un bloqueo ni
+     * tener un bloqueo siendo listo, así que las dos pantallas no pueden discrepar.
+     *
+     * Bloqueos (solo los que el servidor calcula; sin archivos, rutas, observaciones ni nombres de evaluadores):
+     *  - configuracion_pendiente: la convocatoria aún no define sus actividades.
+     *  - documentos_obligatorios: faltan obligatorios aplicables (faltantes: código y nombre del documento del catálogo).
+     *  - habilitacion_pendiente: aún no hay un resultado documental finalizado.
+     *  - no_habilitado: el resultado documental no habilita.
+     *  - referencia_requerida / referencia_invalidada: hay que designar o volver a designar la referencia. Solo se distinguen
+     *    con `$detalleReferencia` (quien puede decidir, que es quien ve ese detalle); sin él, revision_documental.
+     *  - notas_pendientes: con actividades, faltan notas (actividades: las que no tienen nota).
+     *
+     * @param  Collection<int, Postulacion>  $postulaciones  Eloquent, de la convocatoria, con user cargado
+     * @return array{modo: string, configuracion: ?SeleccionConfiguracion, candidatos: Collection}
+     */
+    protected function evaluarCandidatos(Convocatoria $convocatoria, Collection $postulaciones, bool $detalleReferencia = false): array
+    {
+        $configuracion = SeleccionConfiguracion::query()->where('convocatoria_id', $convocatoria->id)->first();
+        $ids = $postulaciones->pluck('id');
+
+        $documentales = $this->estadosDocumentales($ids);
+        // Documentos obligatorios aplicables que faltan (misma regla que el envío), en bloque para todas las postulaciones.
+        // Una postulación incompleta no es candidata lista aunque su evaluación diga «Cumple»: es el caso de las
+        // evaluaciones anteriores a RF-DOC-006, hechas cuando se podía eliminar un obligatorio.
+        $faltantes = app(DocumentosDePostulacion::class)->faltantesDeConvocatoria($convocatoria, $postulaciones);
+        $calificaciones = SeleccionCalificacion::query()
+            ->where('convocatoria_id', $convocatoria->id)
+            ->whereIn('postulacion_id', $ids)
+            ->get(['postulacion_id', 'actividad', 'nota', 'updated_at'])
+            ->groupBy('postulacion_id');
+
+        $modo = match (true) {
+            $configuracion === null => 'pendiente_de_configurar',
+            $configuracion->entrevista_activa || $configuracion->prueba_tecnica_activa => 'con_actividades',
+            default => 'sin_actividades',
+        };
+
+        $candidatos = $postulaciones->map(function (Postulacion $p) use ($documentales, $faltantes, $calificaciones, $configuracion, $modo, $detalleReferencia) {
+            $doc = $documentales->get($p->id);
+            $notas = $calificaciones->get($p->id, collect())->keyBy('actividad');
+            $centesimas = $notas->map(fn ($n) => $this->centesimas((string) $n->nota))->all();
+            $resultado = $modo === 'con_actividades' ? $this->resultadoPonderado($configuracion, $centesimas) : null;
+            $faltan = $faltantes[$p->id] ?? [];
+
+            $bloqueos = [];
+            if ($modo === 'pendiente_de_configurar') {
+                $bloqueos[] = ['codigo' => 'configuracion_pendiente'];
+            }
+            if ($faltan !== []) {
+                $bloqueos[] = ['codigo' => 'documentos_obligatorios', 'faltantes' => $faltan];
+            }
+            $documental = match ($doc['estado']) {
+                'pendiente' => 'habilitacion_pendiente',
+                'no_habilitado' => 'no_habilitado',
+                'requiere_revision' => ! $detalleReferencia ? 'revision_documental' : ($doc['ref_id'] !== null ? 'referencia_invalidada' : 'referencia_requerida'),
+                default => null,
+            };
+            if ($documental !== null) {
+                $bloqueos[] = ['codigo' => $documental];
+            }
+            if ($modo === 'con_actividades' && $resultado === null) {
+                $bloqueos[] = [
+                    'codigo' => 'notas_pendientes',
+                    'actividades' => array_values(array_filter(
+                        array_keys(array_filter(['entrevista' => $configuracion->entrevista_activa, 'prueba_tecnica' => $configuracion->prueba_tecnica_activa])),
+                        fn (string $a) => ! $notas->has($a),
+                    )),
+                ];
+            }
+
+            return [
+                'id' => $p->id,
+                'aspirante' => $p->user->name,
+                'estado_documental' => $doc['estado'],
+                'cumplimiento_documental' => $doc['cumplimiento'],
+                'documentos_completos' => $faltan === [],
+                'resultado' => $resultado,
+                'listo' => $bloqueos === [],
+                'bloqueos' => $bloqueos,
+                // Cambia si cambia la habilitación, la referencia, el resultado o cualquier nota (valor o fecha de edición).
+                'huella' => sha1(json_encode([
+                    $p->id, $doc['estado'], $doc['cumplimiento'], $doc['ref_id'], $doc['vigente'], $resultado,
+                    $notas->sortKeys()->map(fn ($n) => [$n->actividad, (string) $n->nota, $n->updated_at?->getTimestamp()])->values()->all(),
+                ])),
+            ];
+        })->values();
+
+        return ['modo' => $modo, 'configuracion' => $configuracion, 'candidatos' => $candidatos];
     }
 
     /**
