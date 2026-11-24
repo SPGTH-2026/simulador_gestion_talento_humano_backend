@@ -59,7 +59,7 @@ final class EscribeDocumentoPostulacion
 
         // Búsqueda y escritura bajo el bloqueo de la postulación: dos subidas simultáneas del mismo documento no pueden
         // crear dos filas. El archivo anterior se borra solo después de confirmar el cambio.
-        [$documento, $codigoHttp, $anterior] = DB::transaction(function () use ($postulacion, $parametro, $nuevo) {
+        [$documento, $codigoHttp, $anterior] = $this->conArchivoNuevo($nuevo, fn () => DB::transaction(function () use ($postulacion, $parametro, $nuevo) {
             Postulacion::query()->whereKey($postulacion->id)->lockForUpdate()->first();
 
             $existente = PostulacionDocumento::query()
@@ -80,7 +80,7 @@ final class EscribeDocumentoPostulacion
             ]);
 
             return [$creado, 201, null];
-        });
+        }));
 
         if ($anterior !== null) {
             $this->almacen->borrar(...$anterior);
@@ -137,14 +137,14 @@ final class EscribeDocumentoPostulacion
 
         if ($reemplazo) {
             $anterior = [$reemplazo->disco, $reemplazo->ruta];
-            $reemplazo->update($campos);
+            $this->conArchivoNuevo($nuevo, fn () => $reemplazo->update($campos));
             $this->almacen->borrar(...$anterior);
 
             return [$reemplazo->fresh(), 200];
         }
 
         // Recuento y alta bajo el bloqueo de la postulación: dos adicionales simultáneos no pueden superar el tope.
-        $documento = DB::transaction(function () use ($postulacion, $campos, $maxAdicionales) {
+        $documento = $this->conArchivoNuevo($nuevo, fn () => DB::transaction(function () use ($postulacion, $campos, $maxAdicionales) {
             Postulacion::query()->whereKey($postulacion->id)->lockForUpdate()->first();
 
             $total = PostulacionDocumento::query()
@@ -162,9 +162,24 @@ final class EscribeDocumentoPostulacion
                 'postulacion_id' => $postulacion->id,
                 'parametro_id' => null,
             ]);
-        });
+        }));
 
         return [$documento, 201];
+    }
+
+    /**
+     * Ejecuta la escritura en base de datos cuando el archivo nuevo ya está en el disco. Si la escritura falla (el tope
+     * de adicionales lo superó otra subida, error de base de datos), borra ese archivo para que no quede huérfano.
+     */
+    private function conArchivoNuevo(array $nuevo, callable $escribir): mixed
+    {
+        try {
+            return $escribir();
+        } catch (\Throwable $e) {
+            $this->almacen->borrar($nuevo['disco'], $nuevo['ruta']);
+
+            throw $e;
+        }
     }
 
     /**
