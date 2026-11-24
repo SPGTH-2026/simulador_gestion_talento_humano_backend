@@ -7,6 +7,7 @@ use App\Models\CorreccionPostulacion;
 use App\Models\Evaluacion;
 use App\Models\Postulacion;
 use App\Models\User;
+use App\Services\Notificaciones\Avisos;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use App\Services\Correcciones\DecideRondas;
@@ -147,6 +148,9 @@ class RondasCorreccion
             $ronda->update(['autorizacion_id' => $autorizacion->id]);
         }
 
+        // Dentro de la misma transacción: si la solicitud se deshace, los avisos también.
+        app(Avisos::class)->correccionSolicitada($postulacion, count($marcados), $actor);
+
         return $ronda;
     }
 
@@ -195,6 +199,8 @@ class RondasCorreccion
             'abierta' => null,
             'cerrada_at' => now(),
         ]);
+
+        app(Avisos::class)->correccionRespondida($postulacion, $ronda);
 
         return [$ronda, []];
     }

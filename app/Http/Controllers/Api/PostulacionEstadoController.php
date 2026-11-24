@@ -6,6 +6,7 @@ use App\Enums\ConvocatoriaEstado;
 use App\Enums\PostulacionEstado;
 use App\Models\Postulacion;
 use App\Services\DocumentosDePostulacion;
+use App\Services\Notificaciones\Avisos;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -145,6 +146,10 @@ class PostulacionEstadoController extends Controller
             ]);
         }
 
+        if ($retirar) {
+            app(Avisos::class)->postulacionRetirada($postulacion);
+        }
+
         return response()->json([
             'data' => $this->presentar($postulacion->fresh(['estado', 'convocatoria.estado']), $request->user()),
         ]);
@@ -209,6 +214,8 @@ class PostulacionEstadoController extends Controller
                 'postulacion' => 'No se pudo enviar la postulación: su estado cambió. Inténtalo de nuevo.',
             ]);
         }
+
+        app(Avisos::class)->postulacionEnviada($postulacion);
 
         return response()->json([
             'data' => $this->presentar($postulacion->fresh(['estado', 'convocatoria.estado']), $request->user()),
