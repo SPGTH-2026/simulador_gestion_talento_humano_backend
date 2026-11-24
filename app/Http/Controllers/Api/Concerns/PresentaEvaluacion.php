@@ -99,6 +99,10 @@ trait PresentaEvaluacion
                 'correccion_estado' => $e->estadoCorreccion($p),
                 'perfil' => $e->perfil,
                 'documentos_actualizados' => $this->documentosActualizados($p, $e),
+                // Aviso de reapertura: la evaluación finalizada volvió a «en proceso» por un cambio documental.
+                'reabierta' => $e->motivo_reapertura !== null
+                    ? ['motivo' => $e->motivo_reapertura, 'at' => $e->reabierta_at?->toIso8601String()]
+                    : null,
                 'criterios' => $e->relationLoaded('detalles')
                     ? $e->detalles->map(fn ($d) => [
                         'criterio' => $d->criterio,

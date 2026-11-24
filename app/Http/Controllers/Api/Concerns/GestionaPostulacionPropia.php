@@ -80,6 +80,16 @@ trait GestionaPostulacionPropia
     }
 
     /**
+     * La última ronda de corrección de la postulación ya no está vigente (venció o fue respondida). Sin rondas, no cierra nada.
+     */
+    private function rondaCorreccionCerrada(Postulacion $postulacion): bool
+    {
+        $ultima = app(RondasCorreccion::class)->rondas($postulacion)->last();
+
+        return $ultima !== null && $ultima->estado() !== 'vigente';
+    }
+
+    /**
      * Durante una corrección vigente solo se reemplazan los documentos marcados
      * por el evaluador: no se suben adicionales ni se borran documentos.
      */
@@ -152,11 +162,25 @@ trait GestionaPostulacionPropia
     {
         // Corrección vigente: el aspirante puede reemplazar sus documentos aunque
         // la convocatoria ya esté en proceso o la evaluación haya empezado.
-        if ($clave === 'documentos' && $this->correccionVigente($postulacion) !== null) {
-            return;
+        if ($this->correccionVigente($postulacion) !== null) {
+            // BUG-01B: durante una corrección vigente solo se reemplazan los documentos marcados; habilidades y demás
+            // secciones no se pueden tocar aunque la convocatoria siga abierta.
+            if ($clave === 'documentos') {
+                return;
+            }
+
+            throw ValidationException::withMessages([
+                $clave => 'Durante la corrección solo puedes reemplazar los documentos que el evaluador marcó.',
+            ]);
         }
 
         $motivo = $this->motivoNoEditable($postulacion);
+
+        // BUG-01A: con la convocatoria aún «publicada» y sin fecha de evaluación, una corrección ya vencida o respondida
+        // no puede abrir de nuevo la edición de documentos. Solo una ronda vigente permite reemplazar documentos.
+        if ($motivo === '' && $clave === 'documentos' && $this->rondaCorreccionCerrada($postulacion)) {
+            $motivo = 'La corrección solicitada ya no admite cambios de documentos: el plazo terminó o ya fue respondida.';
+        }
 
         if ($motivo === '') {
             return;

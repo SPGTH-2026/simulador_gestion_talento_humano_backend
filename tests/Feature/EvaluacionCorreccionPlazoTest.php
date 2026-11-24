@@ -137,12 +137,12 @@ class EvaluacionCorreccionPlazoTest extends TestCase
             'fecha_limite' => now()->subMinute(),
         ]);
 
-        // Aunque reemplace el documento, el envío se rechaza.
+        // Con el plazo vencido ya no se pueden subir reemplazos (BUG-01A de la auditoría) y el envío se rechaza.
         $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
             ->post("/api/postulaciones/{$postulacion->id}/documentos", [
                 'codigo' => 'hoja_de_vida',
                 'archivo' => UploadedFile::fake()->create('hoja.pdf', 100, 'application/pdf'),
-            ])->assertCreated();
+            ])->assertStatus(422);
 
         $this->actingAs($aspirante)->postJson("/api/postulaciones/{$postulacion->id}/correccion/enviar")
             ->assertStatus(422)
