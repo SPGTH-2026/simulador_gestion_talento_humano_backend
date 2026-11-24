@@ -19,6 +19,14 @@ class MakeAdmin extends Command
     {
         $email = strtolower(trim($this->argument('email')));
 
+        // Solo puede haber un super admin: si ya existe otra cuenta con ese rol, no se crea ni se promueve otra.
+        $otro = User::query()->where('role', Role::SuperAdmin->value)->where('email', '!=', $email)->first();
+        if ($otro) {
+            $this->components->error("Ya existe un super admin ({$otro->email}). Solo puede haber uno.");
+
+            return self::FAILURE;
+        }
+
         $user = User::firstWhere('email', $email);
         $creado = false;
 

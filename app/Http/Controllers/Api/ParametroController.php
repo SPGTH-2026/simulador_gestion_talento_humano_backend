@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\Role;
 use App\Http\Controllers\Controller;
 use App\Models\Parametro;
 use App\Models\ParametroTema;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -37,7 +39,7 @@ class ParametroController extends Controller
                 abort(404, 'Tema de parámetros no encontrado');
             }
 
-            return response()->json(['data' => $this->parametrosDeTema($tema)]);
+            return response()->json(['data' => $this->parametrosDeTema($tema, $request->user())]);
         }
 
         // Catálogo completo: un grupo por tema activo que tenga parámetros activos.
@@ -51,7 +53,7 @@ class ParametroController extends Controller
             'data' => $temas->map(fn (ParametroTema $tema) => [
                 'tema' => $tema->codigo,
                 'nombre' => $tema->nombre,
-                'parametros' => $this->parametrosDeTema($tema),
+                'parametros' => $this->parametrosDeTema($tema, $request->user()),
             ])->values(),
         ]);
     }
@@ -80,6 +82,8 @@ class ParametroController extends Controller
         }
 
         $nombre = trim($datos['nombre']);
+        $usuario = $request->user();
+        $esSuperAdmin = $usuario->role === Role::SuperAdmin;
 
         $duplicado = Parametro::query()
             ->where('tema_id', $tema->id)
@@ -101,7 +105,13 @@ class ParametroController extends Controller
             'activo' => true,
             'es_sistema' => false,
             'es_defecto' => false,
+            // El super admin crea documentos globales; el resto, documentos de su(s) ficha(s) y suyos.
+            'creado_por' => $esSuperAdmin ? null : $usuario->id,
         ]);
+
+        if (! $esSuperAdmin) {
+            $parametro->fichas()->sync($usuario->fichaIds());
+        }
 
         return response()->json([
             'data' => [
@@ -120,11 +130,13 @@ class ParametroController extends Controller
      *
      * @return array<int, array{id: int, codigo: ?string, nombre: string, es_sistema: bool, es_defecto: bool}>
      */
-    private function parametrosDeTema(ParametroTema $tema): array
+    private function parametrosDeTema(ParametroTema $tema, User $usuario): array
     {
         return Parametro::query()
             ->where('tema_id', $tema->id)
             ->where('activo', true)
+            // Solo los documentos pueden crearlos los gestores: ahí cada ficha ve los suyos y los globales.
+            ->when($tema->codigo === 'tipo_documento', fn ($q) => $q->visiblesPara($usuario))
             ->orderBy('orden')
             ->orderBy('nombre')
             ->get(['id', 'codigo', 'nombre', 'es_sistema', 'es_defecto'])

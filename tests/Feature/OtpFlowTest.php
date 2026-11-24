@@ -46,7 +46,7 @@ class OtpFlowTest extends TestCase
     private function user(array $extra = []): User
     {
         return User::factory()->create($extra + [
-            'password' => Hash::make('Dev12345'),
+            'password' => Hash::make($this->clavePrueba()),
             'role' => Role::Aspirante,
             'active' => true,
         ]);
@@ -80,20 +80,20 @@ class OtpFlowTest extends TestCase
         $code = $this->codeDeLog();
 
         // Sesion abierta antes del reset.
-        $this->postJson('/api/auth/login', ['email' => $u->email, 'password' => 'Dev12345'])
+        $this->postJson('/api/auth/login', ['email' => $u->email, 'password' => $this->clavePrueba()])
             ->assertOk();
         $this->assertAuthenticatedAs($u);
 
         $this->postJson('/api/auth/reset-password', [
             'email' => $u->email,
             'code' => $code,
-            'password' => 'NuevaClave99',
-            'password_confirmation' => 'NuevaClave99',
+            'password' => $this->clavePruebaNueva(),
+            'password_confirmation' => $this->clavePruebaNueva(),
         ])->assertOk();
 
         // Contrasena nueva activa, vieja muerta.
-        $this->assertTrue(Hash::check('NuevaClave99', $u->fresh()->password));
-        $this->assertFalse(Hash::check('Dev12345', $u->fresh()->password));
+        $this->assertTrue(Hash::check($this->clavePruebaNueva(), $u->fresh()->password));
+        $this->assertFalse(Hash::check($this->clavePrueba(), $u->fresh()->password));
 
         // La sesion anterior quedo invalidada: la fila en 'sessions' se borro,
         // asi que un nuevo GET a /me ya no autentica. En el test se resetea el
@@ -102,9 +102,9 @@ class OtpFlowTest extends TestCase
             ->where('user_id', $u->id)->count(), 'la sesion anterior debio borrarse');
 
         $this->postJson('/api/auth/logout');
-        $this->postJson('/api/auth/login', ['email' => $u->email, 'password' => 'Dev12345'])
+        $this->postJson('/api/auth/login', ['email' => $u->email, 'password' => $this->clavePrueba()])
             ->assertStatus(422);
-        $this->postJson('/api/auth/login', ['email' => $u->email, 'password' => 'NuevaClave99'])
+        $this->postJson('/api/auth/login', ['email' => $u->email, 'password' => $this->clavePruebaNueva()])
             ->assertOk();
     }
 
@@ -116,11 +116,11 @@ class OtpFlowTest extends TestCase
         $this->postJson('/api/auth/reset-password', [
             'email' => $u->email,
             'code' => '000000',
-            'password' => 'NuevaClave99',
-            'password_confirmation' => 'NuevaClave99',
+            'password' => $this->clavePruebaNueva(),
+            'password_confirmation' => $this->clavePruebaNueva(),
         ])->assertStatus(422);
 
-        $this->assertTrue(Hash::check('Dev12345', $u->fresh()->password));
+        $this->assertTrue(Hash::check($this->clavePrueba(), $u->fresh()->password));
     }
 
     public function test_reset_con_correo_desconocido_no_revela_nada(): void
@@ -128,8 +128,8 @@ class OtpFlowTest extends TestCase
         $this->postJson('/api/auth/reset-password', [
             'email' => 'nadie@test.com',
             'code' => '123456',
-            'password' => 'NuevaClave99',
-            'password_confirmation' => 'NuevaClave99',
+            'password' => $this->clavePruebaNueva(),
+            'password_confirmation' => $this->clavePruebaNueva(),
         ])->assertStatus(422);
     }
 
@@ -149,10 +149,10 @@ class OtpFlowTest extends TestCase
         $this->postJson('/api/auth/reset-password', [
             'email' => $u->email,
             'code' => $this->codeDeLog(),
-            'password' => 'NuevaClave99',
-            'password_confirmation' => 'NuevaClave99',
+            'password' => $this->clavePruebaNueva(),
+            'password_confirmation' => $this->clavePruebaNueva(),
         ])->assertOk();
-        $this->assertTrue(Hash::check('NuevaClave99', $u->fresh()->password));
+        $this->assertTrue(Hash::check($this->clavePruebaNueva(), $u->fresh()->password));
 
         // Pasada la ventana, un envio nuevo si que emite correo.
         $this->travel(OtpService::IDEMPOTENCY_SECONDS + 1)->seconds();
@@ -169,7 +169,7 @@ class OtpFlowTest extends TestCase
         $code = $this->codeDeLog();
 
         // ...pero se intenta usar para verificar el correo.
-        $this->postJson('/api/auth/login', ['email' => $u->email, 'password' => 'Dev12345']);
+        $this->postJson('/api/auth/login', ['email' => $u->email, 'password' => $this->clavePrueba()]);
         $this->postJson('/api/auth/verification/confirm', ['code' => $code])->assertStatus(422);
 
         $this->assertNull($u->fresh()->email_verified_at);
@@ -180,11 +180,11 @@ class OtpFlowTest extends TestCase
         $this->postJson('/api/auth/reset-password', [
             'email' => $u->email,
             'code' => $vcode,
-            'password' => 'NuevaClave99',
-            'password_confirmation' => 'NuevaClave99',
+            'password' => $this->clavePruebaNueva(),
+            'password_confirmation' => $this->clavePruebaNueva(),
         ])->assertStatus(422);
 
-        $this->assertTrue(Hash::check('Dev12345', $u->fresh()->password));
+        $this->assertTrue(Hash::check($this->clavePrueba(), $u->fresh()->password));
     }
 
     // ── Verificar correo ────────────────────────────────────────────────
@@ -198,7 +198,7 @@ class OtpFlowTest extends TestCase
     public function test_confirmar_marca_el_correo_como_verificado(): void
     {
         $u = $this->user(['email' => 'verif@test.com', 'email_verified_at' => null]);
-        $this->postJson('/api/auth/login', ['email' => $u->email, 'password' => 'Dev12345']);
+        $this->postJson('/api/auth/login', ['email' => $u->email, 'password' => $this->clavePrueba()]);
 
         $this->postJson('/api/auth/verification/send')->assertOk();
         $code = $this->codeDeLog();
@@ -211,7 +211,7 @@ class OtpFlowTest extends TestCase
     public function test_reenviar_ya_verificado_no_manda_correo(): void
     {
         $u = $this->user(['email' => 'yaok@test.com', 'email_verified_at' => now()]);
-        $this->postJson('/api/auth/login', ['email' => $u->email, 'password' => 'Dev12345']);
+        $this->postJson('/api/auth/login', ['email' => $u->email, 'password' => $this->clavePrueba()]);
 
         $this->postJson('/api/auth/verification/send')
             ->assertOk()
@@ -226,7 +226,7 @@ class OtpFlowTest extends TestCase
     public function test_codigo_expirado_no_sirve(): void
     {
         $u = $this->user(['email' => 'expira@test.com', 'email_verified_at' => null]);
-        $this->postJson('/api/auth/login', ['email' => $u->email, 'password' => 'Dev12345']);
+        $this->postJson('/api/auth/login', ['email' => $u->email, 'password' => $this->clavePrueba()]);
         $this->postJson('/api/auth/verification/send');
 
         // Se caduca a mano.
@@ -241,7 +241,7 @@ class OtpFlowTest extends TestCase
     public function test_tres_codigos_mal_consecutivos_bloquean(): void
     {
         $u = $this->user(['email' => 'intentos@test.com', 'email_verified_at' => null]);
-        $this->postJson('/api/auth/login', ['email' => $u->email, 'password' => 'Dev12345']);
+        $this->postJson('/api/auth/login', ['email' => $u->email, 'password' => $this->clavePrueba()]);
         $this->postJson('/api/auth/verification/send');
 
         // Fallar 3 veces agota los intentos.

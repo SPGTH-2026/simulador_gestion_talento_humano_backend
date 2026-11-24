@@ -103,7 +103,7 @@ class PostulacionDocumentoSubidaTest extends TestCase
             ])
             ->assertCreated();
 
-        $fichaId = $postulacion->convocatoria->ficha_id;
+        $fichaId = $postulacion->convocatoria->ficha->codigo;
         $esperado = "fichas/{$fichaId}/usuarios/{$aspirante->id}/postulaciones/{$postulacion->id}/documentos/";
 
         $this->assertStringStartsWith($esperado, PostulacionDocumento::sole()->ruta);

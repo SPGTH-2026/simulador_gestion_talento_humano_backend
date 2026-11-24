@@ -207,6 +207,14 @@ class FichaController extends Controller
             'usuario_id' => ['required', 'integer', 'exists:users,id'],
         ], $this->mensajes(), $this->atributos());
 
+        // Un instructor no puede quedarse sin ficha: si esta es la única, primero se le asigna otra.
+        $instructorAQuitar = User::query()->findOrFail($datos['usuario_id']);
+        if ($instructorAQuitar->fichas()->count() <= 1 && $instructorAQuitar->fichas()->whereKey($ficha->id)->exists()) {
+            throw ValidationException::withMessages([
+                'usuario_id' => 'El instructor debe quedar en al menos una ficha: asígnale otra antes de quitarlo de esta.',
+            ]);
+        }
+
         $ficha->instructores()->detach($datos['usuario_id']);
 
         $ficha->load(['creador', 'instructores'])->loadCount(['convocatorias', 'usuarios']);

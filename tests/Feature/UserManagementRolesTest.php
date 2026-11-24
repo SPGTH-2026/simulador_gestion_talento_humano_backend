@@ -15,12 +15,28 @@ class UserManagementRolesTest extends TestCase
     public function test_super_admin_puede_hacer_instructor(): void
     {
         $admin = $this->usuario(Role::SuperAdmin);
-        $aspirante = $this->usuario(Role::Aspirante);
+        $aspirante = $this->usuario(Role::Aspirante, null, ['ficha_id' => \App\Models\Ficha::create(['codigo' => '3173334', 'nombre_programa' => 'ADSO'])->id]);
+        $ficha = \App\Models\Ficha::create(['codigo' => '3173335', 'nombre_programa' => 'ADSO']);
+
+        // Un instructor vive en al menos una ficha: se asignan en la misma acción.
+        $this->actingAs($admin)->patchJson("/api/usuarios/{$aspirante->id}", [
+            'role' => 'instructor',
+            'active' => true,
+            'fichas' => [$ficha->id],
+        ])->assertOk()->assertJsonPath('data.role', 'instructor');
+
+        $this->assertSame([$ficha->id], $aspirante->fresh()->fichas()->pluck('fichas.id')->all());
+    }
+
+    public function test_super_admin_no_puede_hacer_instructor_sin_ficha(): void
+    {
+        $admin = $this->usuario(Role::SuperAdmin);
+        $aspirante = $this->usuario(Role::Aspirante, null, ['ficha_id' => \App\Models\Ficha::create(['codigo' => '3173334', 'nombre_programa' => 'ADSO'])->id]);
 
         $this->actingAs($admin)->patchJson("/api/usuarios/{$aspirante->id}", [
             'role' => 'instructor',
             'active' => true,
-        ])->assertOk()->assertJsonPath('data.role', 'instructor');
+        ])->assertStatus(422)->assertJsonValidationErrors('fichas');
     }
 
     public function test_nadie_modifica_su_propio_usuario(): void
@@ -48,7 +64,8 @@ class UserManagementRolesTest extends TestCase
 
         $this->assertContains($aprendizA->id, $ids);
         $this->assertContains($aspiranteA->id, $ids);
-        $this->assertContains($libre->id, $ids);
+        // Un aspirante sin ficha no existe para el instructor: no aparece en su lista.
+        $this->assertNotContains($libre->id, $ids);
         $this->assertNotContains($aprendizB->id, $ids);
         $this->assertNotContains($aspiranteB->id, $ids);
 

@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Api\Concerns\GestionaPostulacionPropia;
-use App\Http\Controllers\Api\Concerns\GestionaArchivosDocumentos;
+use App\Services\Documentos\AlmacenArchivos;
 use App\Http\Controllers\Controller;
 use App\Models\ConvocatoriaSkill;
 use App\Models\Postulacion;
@@ -11,7 +11,6 @@ use App\Models\PostulacionSkill;
 use App\Support\RutaDocumento;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -34,7 +33,8 @@ use Symfony\Component\HttpFoundation\Response;
 class PostulacionSkillController extends Controller
 {
     use GestionaPostulacionPropia;
-    use GestionaArchivosDocumentos;
+
+    public function __construct(private AlmacenArchivos $almacen) {}
 
     /**
      * Declara una skill. SOLO se admite la skill que PIDE la convocatoria
@@ -119,7 +119,7 @@ class PostulacionSkillController extends Controller
         $disco = $skill->certificado_disco;
         $ruta = $skill->certificado_ruta;
         $skill->delete();
-        $this->borrarArchivo($disco, $ruta);
+        $this->almacen->borrar($disco, $ruta);
 
         return response()->json(null, 204);
     }
@@ -172,9 +172,9 @@ class PostulacionSkillController extends Controller
     /** Sube o reemplaza el certificado de la skill (dueño y gestor documental). */
     private function guardarCertificado(Request $request, PostulacionSkill $skill): JsonResponse
     {
-        $request->validate(['archivo' => $this->reglasArchivo()], $this->mensajes(), $this->atributos());
+        $request->validate(['archivo' => $this->almacen->reglas()], $this->mensajes(), $this->atributos());
 
-        $nuevo = $this->guardarArchivo(
+        $nuevo = $this->almacen->guardar(
             $request->file('archivo'),
             RutaDocumento::carpeta($skill->postulacion, 'skills'),
         );
@@ -188,7 +188,7 @@ class PostulacionSkillController extends Controller
             'certificado_tamano_bytes' => $nuevo['tamano_bytes'],
         ]);
 
-        $this->borrarArchivo(...$anterior);
+        $this->almacen->borrar(...$anterior);
 
         return response()->json(['data' => $this->resumen($skill->fresh())], 200);
     }
@@ -211,7 +211,7 @@ class PostulacionSkillController extends Controller
             'certificado_tamano_bytes' => null,
         ]);
 
-        $this->borrarArchivo($disco, $ruta);
+        $this->almacen->borrar($disco, $ruta);
     }
 
     private function descargarCertificado(Postulacion $postulacion, PostulacionSkill $skill, bool $inline = false): Response
@@ -222,7 +222,7 @@ class PostulacionSkillController extends Controller
             abort(404, 'Certificado no encontrado.');
         }
 
-        return $this->leerArchivo(
+        return $this->almacen->leer(
             $skill->certificado_disco,
             $skill->certificado_ruta,
             $skill->certificado_nombre_original,

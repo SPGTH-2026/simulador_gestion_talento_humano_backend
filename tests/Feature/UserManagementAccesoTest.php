@@ -32,7 +32,7 @@ class UserManagementAccesoTest extends TestCase
 
         $aprendizMio = $this->usuario(Role::Aprendiz, 'general', ['ficha_id' => $instructor->fichas()->first()->id]);
         $aprendizOtro = $this->usuario(Role::Aprendiz, 'general', ['ficha_id' => $fichaAjena->id]);
-        $aspirante = $this->usuario(Role::Aspirante);
+        $aspirante = $this->usuario(Role::Aspirante, null, ['ficha_id' => $instructor->fichas()->first()->id]);
 
         $ids = collect($this->actingAs($instructor)->getJson('/api/usuarios')->json('data'))
             ->pluck('id')->all();
@@ -64,7 +64,7 @@ class UserManagementAccesoTest extends TestCase
     {
         $instructor = $this->instructor();
         $ficha = $instructor->fichas()->first();
-        $aspirante = $this->usuario(Role::Aspirante);
+        $aspirante = $this->usuario(Role::Aspirante, null, ['ficha_id' => $ficha->id]);
 
         $this->actingAs($instructor)->patchJson("/api/usuarios/{$aspirante->id}", [
             'role' => 'aprendiz',
@@ -81,15 +81,18 @@ class UserManagementAccesoTest extends TestCase
     public function test_instructor_revierte_a_aspirante(): void
     {
         $instructor = $this->instructor();
-        $aprendiz = $this->usuario(Role::Aprendiz, 'general', ['ficha_id' => $instructor->fichas()->first()->id]);
+        $fichaId = $instructor->fichas()->first()->id;
+        $aprendiz = $this->usuario(Role::Aprendiz, 'general', ['ficha_id' => $fichaId]);
 
+        // El aspirante sigue dentro de su ficha: sin ficha no puede existir.
         $this->actingAs($instructor)->patchJson("/api/usuarios/{$aprendiz->id}", [
             'role' => 'aspirante',
             'active' => true,
+            'ficha_id' => $fichaId,
         ])->assertOk();
 
         $this->assertSame('aspirante', $aprendiz->fresh()->role->value);
-        $this->assertNull($aprendiz->fresh()->ficha_id);
+        $this->assertSame($fichaId, $aprendiz->fresh()->ficha_id);
     }
 
     public function test_instructor_no_puede_sacar_a_ficha_ajena(): void

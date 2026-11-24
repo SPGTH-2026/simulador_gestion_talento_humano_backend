@@ -24,6 +24,7 @@ class TareasProgramadasController extends Controller
     /** Tareas que se pueden disparar desde fuera: nombre público => comando de Artisan. */
     private const TAREAS = [
         'cerrar-vencidas' => 'convocatorias:cerrar-vencidas',
+        'resumen-diario' => 'notificaciones:resumen-diario',
     ];
 
     public function ejecutar(Request $request, string $tarea): JsonResponse

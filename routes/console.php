@@ -16,3 +16,10 @@ Schedule::command('convocatorias:cerrar-vencidas')
     ->dailyAt('00:05')
     ->timezone('America/Bogota')
     ->withoutOverlapping();
+
+// Resumen de pendientes (evaluar, seleccionar, cerrar; borradores, correcciones por vencer, cierres próximos). Corre
+// después del cierre automático, para que los avisos reflejen las convocatorias ya cerradas.
+Schedule::command('notificaciones:resumen-diario')
+    ->dailyAt('07:00')
+    ->timezone('America/Bogota')
+    ->withoutOverlapping();

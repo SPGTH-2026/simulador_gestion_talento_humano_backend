@@ -39,7 +39,7 @@ class FichaAspiranteTest extends TestCase
         $this->postJson('/api/auth/register', [
             'name' => 'Nuevo Aspirante',
             'email' => 'nuevo@test.com',
-            'password' => 'Clave12345',
+            'password' => $this->clavePrueba(),
             'ficha_codigo' => $ficha->codigo,
         ])->assertStatus(201)->assertJsonPath('user.ficha.id', $ficha->id);
 
@@ -51,7 +51,7 @@ class FichaAspiranteTest extends TestCase
         $this->postJson('/api/auth/register', [
             'name' => 'Nuevo Aspirante',
             'email' => 'nuevo@test.com',
-            'password' => 'Clave12345',
+            'password' => $this->clavePrueba(),
             'ficha_codigo' => '99999999',
         ])->assertStatus(422)->assertJsonValidationErrors('ficha_codigo');
 

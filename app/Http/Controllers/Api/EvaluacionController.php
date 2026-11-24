@@ -6,6 +6,7 @@ use App\Enums\Role;
 use App\Http\Controllers\Controller;
 use App\Models\Evaluacion;
 use App\Models\Postulacion;
+use App\Services\Notificaciones\Avisos;
 use App\Services\RondasCorreccion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -202,6 +203,9 @@ class EvaluacionController extends Controller
             $evaluacion->observaciones = $datos['observaciones'] ?? null;
             // Al pedir corrección la evaluación se guarda primero «en proceso»: si no, el servicio de rondas la leería como una
             // solicitud antigua sin plazo. Pasa a «corrección solicitada» cuando la ronda ya está creada.
+            // Solo un paso a «finalizada» avisa al aspirante: guardar de nuevo una evaluación ya finalizada no repite el aviso.
+            $finalizaAhora = $estadoNuevo === 'finalizada' && $evaluacion->estado !== 'finalizada';
+
             $evaluacion->estado = $estadoNuevo === 'correccion_solicitada' && $evaluacion->estado !== 'correccion_solicitada'
                 ? 'en_proceso'
                 : $estadoNuevo;
@@ -248,6 +252,10 @@ class EvaluacionController extends Controller
             if ($existia) {
                 DB::table('evaluaciones')->where('id', $evaluacion->id)->increment('revision');
                 $evaluacion->refresh();
+            }
+
+            if ($finalizaAhora) {
+                app(Avisos::class)->evaluacionFinalizada($evaluacion, $postulacion, $actor, $pasaNuevo === true);
             }
 
             return $evaluacion;
