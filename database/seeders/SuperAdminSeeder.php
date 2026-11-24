@@ -29,6 +29,19 @@ class SuperAdminSeeder extends Seeder
             return;
         }
 
+        // Solo la cuenta de SUPER_ADMIN_EMAIL es super admin. Cualquier otra cuenta con ese rol se inhabilita: no tiene un
+        // rol nuevo al que pasar, y sin ficha no puede existir como aspirante. Sus datos se conservan.
+        User::query()
+            ->where('role', Role::SuperAdmin->value)
+            ->where('email', '!=', $email)
+            ->get()
+            ->each(function (User $otro) {
+                $otro->forceFill(['active' => false])->save();
+                Log::warning('SuperAdminSeeder: cuenta super admin inhabilitada; solo existe la de SUPER_ADMIN_EMAIL.', [
+                    'usuario_id' => $otro->id,
+                ]);
+            });
+
         $user = User::firstWhere('email', $email);
 
         if (! $user) {
