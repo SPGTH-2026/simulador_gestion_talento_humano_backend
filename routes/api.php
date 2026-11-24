@@ -41,6 +41,10 @@ Route::prefix('auth')->group(function () {
     // stateful, así que aquí se fuerza 'web' para poder iniciar sesión.
     Route::get('{provider}/redirect', [SocialAuthController::class, 'redirect'])->middleware('web');
     Route::get('{provider}/callback', [SocialAuthController::class, 'callback'])->middleware('web');
+    // Aspirante que entró con Google y todavía no eligió su ficha: la cuenta se crea al elegirla.
+    Route::get('google/pendiente', [SocialAuthController::class, 'pendiente'])->middleware('web');
+    Route::post('google/pendiente/ficha', [SocialAuthController::class, 'completarPendiente'])
+        ->middleware(['web', 'throttle:login']);
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('me', [AuthController::class, 'me']);
@@ -59,7 +63,7 @@ Route::prefix('auth')->group(function () {
 // ── Usuarios y fichas ──────────────────────────────────────────────────
 // Lo tienen el super admin y el instructor (usuarios:gestionar). 'verified'
 // exige correo confirmado, igual que el resto de rutas de negocio.
-Route::middleware(['auth:sanctum', 'verified', 'can:usuarios:gestionar'])->group(function () {
+Route::middleware(['auth:sanctum', 'verified', 'ficha', 'can:usuarios:gestionar'])->group(function () {
     Route::get('usuarios', [UserController::class, 'index']);
     Route::patch('usuarios/{user}', [UserController::class, 'update']);
 
@@ -90,7 +94,7 @@ Route::middleware(['auth:sanctum', 'verified', 'can:usuarios:gestionar'])->group
 // 'ver' para aspirante/gestores visualizar; 'gestionar' para crear, editar y
 // cambiar estado. El selector de fichas del formulario es GET /api/fichas
 // (FichaController:index): GET /api/convocatorias/fichas se retiró en el Paso 2b.
-Route::middleware(['auth:sanctum', 'verified'])->group(function () {
+Route::middleware(['auth:sanctum', 'verified', 'ficha'])->group(function () {
     Route::get('parametros', [ParametroController::class, 'index'])->middleware('can:convocatorias:ver');
     // Documento NUEVO del catálogo (especialización, maestría, etc.) para
     // sumarlo a una convocatoria. Solo quien gestiona convocatorias.

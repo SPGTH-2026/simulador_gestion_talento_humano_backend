@@ -44,7 +44,7 @@ class UserController extends Controller
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
-        $query = User::query()->with('ficha')->withCount('postulaciones');
+        $query = User::query()->with(['ficha', 'fichas:id,codigo'])->withCount('postulaciones');
 
         if ($datos['ficha_id'] ?? null) {
             $query->where('ficha_id', $datos['ficha_id']);
@@ -124,6 +124,9 @@ class UserController extends Controller
             'subrole' => ['nullable', 'string'],
             'active' => ['required', 'boolean'],
             'ficha_id' => $this->reglasDeFicha($actor),
+            // Solo para el rol instructor: las fichas que asigna el super admin (un instructor vive en una o más).
+            'fichas' => ['nullable', 'array'],
+            'fichas.*' => ['integer', 'exists:fichas,id'],
         ]);
 
         if ($user->id === $request->user()->id) {
@@ -167,6 +170,16 @@ class UserController extends Controller
             }
         }
 
+        // La ficha es obligatoria para el aspirante: sin ficha no puede existir una cuenta de aspirante.
+        if ($datos['role'] === Role::Aspirante->value && ! $fichaId) {
+            throw ValidationException::withMessages(['ficha_id' => 'El aspirante debe quedar en una ficha']);
+        }
+        // Un instructor debe tener al menos una ficha asignada.
+        $fichasInstructor = array_values(array_unique(array_map('intval', $datos['fichas'] ?? [])));
+        if ($datos['role'] === Role::Instructor->value && $fichasInstructor === []) {
+            throw ValidationException::withMessages(['fichas' => 'El instructor debe tener al menos una ficha']);
+        }
+
         $user->forceFill([
             'role' => $datos['role'],
             'subrole' => $subrole ?: null,
@@ -174,13 +187,20 @@ class UserController extends Controller
             'ficha_id' => $fichaId ?: null,
         ])->save();
 
+        // Las fichas de un instructor viven en la tabla ficha_instructor; cualquier otro rol no las conserva.
+        if ($datos['role'] === Role::Instructor->value) {
+            $user->fichas()->sync($fichasInstructor);
+        } else {
+            $user->fichas()->detach();
+        }
+
         // Al cambiar rol/estado se invalidan las sesiones y tokens antiguos: si alguien
         // era aprendiz con permisos y dejó de serlo, cerrar la pestaña no debe
         // mantenerlo dentro con privilegios viejos.
         DB::table('sessions')->where('user_id', $user->id)->delete();
         $user->tokens()->delete();
 
-        return response()->json(['data' => $this->presentar($user->refresh()->load('ficha'))]);
+        return response()->json(['data' => $this->presentar($user->refresh()->load(['ficha', 'fichas:id,codigo']))]);
     }
 
     private function presentar(User $u): array
@@ -205,6 +225,10 @@ class UserController extends Controller
                     'nombre_programa' => $u->ficha?->nombre_programa,
                 ]
                 : null,
+            // Fichas de un instructor (tabla ficha_instructor). Vacío para los demás roles.
+            'fichas' => $u->relationLoaded('fichas')
+                ? $u->fichas->map(fn ($f) => ['id' => $f->id, 'codigo' => $f->codigo])->values()->all()
+                : [],
         ];
     }
 }

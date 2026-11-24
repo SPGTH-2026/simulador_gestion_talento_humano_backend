@@ -3,19 +3,26 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\Role;
+use App\Models\Ficha;
 use App\Http\Controllers\Controller;
 use App\Models\SocialAccount;
 use App\Models\User;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Laravel\Socialite\Facades\Socialite;
 
 class SocialAuthController extends Controller
 {
     private const PROVIDERS = ['google'];
+
+    /** Clave de sesión con los datos de Google de un aspirante que todavía no eligió ficha. */
+    private const CLAVE_PENDIENTE = 'google_pendiente';
 
     public function redirect(string $provider)
     {
@@ -77,17 +84,16 @@ class SocialAuthController extends Controller
             $user = User::where('email', $social->getEmail())->first();
 
             if (! $user) {
-                // Aspirante nuevo: se crea verificado (Google confirmó el correo)
-                // y sin OTP. El rol inicial es aspirante; el instructor lo ubica
-                // en su ficha y le asigna el rol después.
-                $user = User::forceCreate([
-                    'name' => $social->getName() ?: ($social->getNickname() ?: $social->getEmail()),
-                    'email' => $social->getEmail(),
-                    'password' => Str::random(40), // no se usa; la cuenta entra por el proveedor
-                    'role' => Role::Aspirante,     // el rol NUNCA viene del proveedor
-                    'active' => true,
-                    'email_verified_at' => now(),
+                // Aspirante nuevo: la cuenta NO se crea todavía. Sin ficha no puede existir, así que los datos de Google
+                // quedan en la sesión hasta que el aspirante elige su ficha (ver completarPendiente).
+                $request->session()->put(self::CLAVE_PENDIENTE, [
+                    'provider' => $provider,
+                    'provider_id' => (string) $social->getId(),
+                    'email' => (string) $social->getEmail(),
+                    'name' => (string) ($social->getName() ?: ($social->getNickname() ?: $social->getEmail())),
                 ]);
+
+                return redirect("$front/completar-ficha?pendiente=google");
             }
 
             $user->socialAccounts()->create(['provider' => $provider, 'provider_id' => (string) $social->getId()]);
@@ -108,6 +114,65 @@ class SocialAuthController extends Controller
 
         // El front decide qué hacer según el perfil (ej. completar la ficha).
         return redirect($front);
+    }
+
+    /** Datos de Google pendientes de completar con la ficha (solo lectura, para la pantalla de ficha). */
+    public function pendiente(Request $request): JsonResponse
+    {
+        $datos = $request->session()->get(self::CLAVE_PENDIENTE);
+        abort_unless(is_array($datos), 404, 'No hay un registro pendiente con Google.');
+
+        return response()->json(['data' => ['email' => $datos['email'], 'name' => $datos['name']]]);
+    }
+
+    /**
+     * Crea la cuenta del aspirante que entró con Google, ya con su ficha, verificada y con la sesión abierta. Sin ficha no
+     * se crea nada: la ficha es obligatoria.
+     */
+    public function completarPendiente(Request $request): JsonResponse
+    {
+        $datos = $request->session()->get(self::CLAVE_PENDIENTE);
+        if (! is_array($datos)) {
+            return response()->json(['message' => 'No hay un registro pendiente con Google.'], 404);
+        }
+
+        $validados = $request->validate([
+            'ficha_codigo' => ['required', 'string', 'max:50'],
+        ]);
+
+        $ficha = Ficha::where('codigo', $validados['ficha_codigo'])->first();
+        if (! $ficha) {
+            throw ValidationException::withMessages(['ficha_codigo' => 'La ficha no existe']);
+        }
+
+        if (User::where('email', $datos['email'])->exists()) {
+            $request->session()->forget(self::CLAVE_PENDIENTE);
+            throw ValidationException::withMessages(['ficha_codigo' => 'Ya existe una cuenta con ese correo. Entra de nuevo.']);
+        }
+
+        $user = DB::transaction(function () use ($datos, $ficha) {
+            $creado = User::forceCreate([
+                'name' => $datos['name'],
+                'email' => $datos['email'],
+                'password' => Str::random(40), // no se usa; la cuenta entra por el proveedor
+                'role' => Role::Aspirante,     // el rol NUNCA viene del proveedor
+                'ficha_id' => $ficha->id,
+                'active' => true,
+                'email_verified_at' => now(),
+            ]);
+            $creado->socialAccounts()->create([
+                'provider' => $datos['provider'],
+                'provider_id' => $datos['provider_id'],
+            ]);
+
+            return $creado;
+        });
+
+        $request->session()->forget(self::CLAVE_PENDIENTE);
+        Auth::guard('web')->login($user);
+        $request->session()->regenerate();
+
+        return response()->json(['data' => ['id' => $user->id, 'email' => $user->email]], 201);
     }
 
     /**

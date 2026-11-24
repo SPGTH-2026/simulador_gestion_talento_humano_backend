@@ -29,6 +29,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'verified' => EnsureEmailIsVerified::class,
+            'ficha' => \App\Http\Middleware\ExigirFicha::class,
         ]);
 
         // Backend solo-API: si un invitado (p. ej. sesión expirada) llama a /api,

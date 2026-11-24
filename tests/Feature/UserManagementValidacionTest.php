@@ -28,7 +28,8 @@ class UserManagementValidacionTest extends TestCase
     public function test_subrol_invalido_para_aprendiz_rechaza(): void
     {
         $instructor = $this->instructor();
-        $aspirante = $this->usuario(Role::Aspirante);
+        // El aspirante ya pertenece a la ficha del instructor: sin ficha no existe para él.
+        $aspirante = $this->usuario(Role::Aspirante, null, ['ficha_id' => $instructor->fichas()->first()->id]);
 
         $this->actingAs($instructor)->patchJson("/api/usuarios/{$aspirante->id}", [
             'role' => 'aprendiz',

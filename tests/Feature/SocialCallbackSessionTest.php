@@ -52,34 +52,57 @@ class SocialCallbackSessionTest extends TestCase
         Socialite::shouldReceive('driver')->andReturn($provider);
     }
 
-    public function test_callback_google_nuevo_crea_aspirante_verificado_sin_otp(): void
+    public function test_callback_google_nuevo_no_crea_cuenta_hasta_elegir_ficha(): void
     {
         $this->fakeSocialite();
 
         $response = $this->get('/api/auth/google/callback');
 
-        $response->assertRedirect();
+        $response->assertRedirect(config('app.frontend_url').'/completar-ficha?pendiente=google');
+        $this->assertGuest();
 
-        $url = $response->headers->get('Location');
+        // La cuenta no existe todavía: sin ficha no puede haber aspirante.
+        $this->assertDatabaseMissing('users', ['email' => 'ana.'.getmypid().'@test.com']);
+    }
 
-        // 1. NO debe haber token en la URL ni en el fragmento.
-        $this->assertStringNotContainsString('token', $url);
-        $this->assertStringNotContainsString('#', $url);
+    public function test_completar_pendiente_crea_aspirante_con_ficha_y_abre_sesion(): void
+    {
+        $ficha = \App\Models\Ficha::create(['codigo' => '3173334', 'nombre_programa' => 'ADSO']);
+        $this->fakeSocialite();
 
-        // 2. Redirige al inicio del front, no a la verificación.
-        $this->assertSame(config('app.frontend_url'), $url);
+        $this->get('/api/auth/google/callback');
 
-        // 3. Se creó el usuario, la cuenta social y quedó verificado.
+        $this->getJson('/api/auth/google/pendiente')
+            ->assertOk()
+            ->assertJsonPath('data.email', 'ana.'.getmypid().'@test.com');
+
+        $this->postJson('/api/auth/google/pendiente/ficha', ['ficha_codigo' => '3173334'])
+            ->assertCreated();
+
         $user = User::where('email', 'ana.'.getmypid().'@test.com')->first();
         $this->assertNotNull($user);
         $this->assertSame(Role::Aspirante, $user->role);
+        $this->assertSame($ficha->id, $user->ficha_id);
         $this->assertNotNull($user->email_verified_at);
+        $this->assertDatabaseHas('social_accounts', ['user_id' => $user->id, 'provider' => 'google', 'provider_id' => 'google-abc123']);
+        $this->assertAuthenticatedAs($user);
+    }
 
-        // 4. NO se generó OTP: Google ya confirmó el correo.
-        $this->assertDatabaseMissing('email_otps', [
-            'email' => $user->email,
-            'purpose' => OtpService::VERIFY_EMAIL,
-        ]);
+    public function test_completar_pendiente_sin_ficha_valida_o_sin_registro_no_crea_nada(): void
+    {
+        \App\Models\Ficha::create(['codigo' => '3173334', 'nombre_programa' => 'ADSO']);
+
+        $this->postJson('/api/auth/google/pendiente/ficha', ['ficha_codigo' => '3173334'])
+            ->assertNotFound();
+
+        $this->fakeSocialite();
+        $this->get('/api/auth/google/callback');
+
+        $this->postJson('/api/auth/google/pendiente/ficha', ['ficha_codigo' => '00000000'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('ficha_codigo');
+
+        $this->assertDatabaseMissing('users', ['email' => 'ana.'.getmypid().'@test.com']);
     }
 
     public function test_cuenta_existente_por_correo_se_enlaza_y_conserva_el_rol(): void
@@ -183,6 +206,7 @@ class SocialCallbackSessionTest extends TestCase
 
     public function test_callback_con_estado_valido_inicia_sesion(): void
     {
+        User::factory()->create(['email' => 'ana.'.getmypid().'@test.com', 'email_verified_at' => now()]);
         $this->fakeSocialite();
 
         $response = $this->withSession(['state' => 'estado-123'])
