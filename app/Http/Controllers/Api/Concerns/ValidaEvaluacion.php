@@ -195,11 +195,44 @@ trait ValidaEvaluacion
         $obtenido = 0.0;
         foreach ($elementos as $clave => $peso) {
             if (! empty($perfil[$clave])) {
-                $obtenido += $peso;
+                // Un documento con checklist aporta solo la parte de sus ítems marcados como «Cumple».
+                $fraccion = str_starts_with($clave, 'doc-')
+                    ? $this->fraccionChecklistDocumento($postulacion, (int) substr($clave, 4), $perfil)
+                    : 1.0;
+                $obtenido += $peso * $fraccion;
             }
         }
 
         return (int) round(min(100.0, ($obtenido / $total) * 100));
+    }
+
+    /**
+     * Parte de un documento que aporta según su checklist: ítems marcados «Cumple» / total de ítems. Sin ítems = 1 (el
+     * documento completo cuenta cuando se marca «Cumple»).
+     */
+    private function fraccionChecklistDocumento(Postulacion $postulacion, int $parametroId, ?array $perfil): float
+    {
+        $documento = $postulacion->convocatoria?->documentos?->firstWhere('id', $parametroId);
+        $texto = $documento?->pivot?->items;
+
+        if ($texto === null || trim((string) $texto) === '') {
+            return 1.0;
+        }
+
+        $lineas = array_values(array_filter(array_map('trim', explode("\n", (string) $texto)), fn ($linea) => $linea !== ''));
+
+        if ($lineas === []) {
+            return 1.0;
+        }
+
+        $cumplen = 0;
+        foreach (array_keys($lineas) as $indice) {
+            if (! empty($perfil["docitem-{$parametroId}-{$indice}"])) {
+                $cumplen++;
+            }
+        }
+
+        return $cumplen / count($lineas);
     }
 
     /**
