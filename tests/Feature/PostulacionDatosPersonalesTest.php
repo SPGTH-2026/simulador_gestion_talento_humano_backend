@@ -152,13 +152,38 @@ class PostulacionDatosPersonalesTest extends TestCase
         $this->assertNull(PostulacionDatosPersonales::firstOrFail()->representante_nombre);
     }
 
-    public function test_exige_la_autorizacion_de_tratamiento_de_datos(): void
+    public function test_los_datos_se_guardan_sin_autorizar_pero_no_cuentan_como_completos_ni_dejan_enviar(): void
     {
-        [$aspirante, $postulacion] = $this->borrador();
+        [$aspirante, $postulacion] = $this->borrador(['hoja_de_vida' => false]);
 
         $this->guardar($aspirante, $postulacion, $this->cuerpo(['acepta_tratamiento_datos' => false]))
+            ->assertOk()
+            ->assertJsonPath('data.completo', false)
+            ->assertJsonPath('data.datos.acepta_tratamiento_datos', false)
+            ->assertJsonPath('data.datos.nombres', 'Camilo Andrés');
+
+        $this->actingAs($aspirante)->postJson("/api/postulaciones/{$postulacion->id}/enviar")
             ->assertStatus(422)
-            ->assertJsonValidationErrors('acepta_tratamiento_datos');
+            ->assertJsonValidationErrors('datos_personales');
+
+        // Al marcar la autorización queda completo y ya se puede enviar.
+        $this->guardar($aspirante, $postulacion, $this->cuerpo(['acepta_tratamiento_datos' => true]))
+            ->assertOk()
+            ->assertJsonPath('data.completo', true);
+        $this->actingAs($aspirante)->postJson("/api/postulaciones/{$postulacion->id}/enviar")->assertOk();
+    }
+
+    public function test_la_autorizacion_dada_no_se_revoca_al_guardar_de_nuevo(): void
+    {
+        [$aspirante, $postulacion] = $this->borrador();
+        $this->guardar($aspirante, $postulacion, $this->cuerpo(['acepta_tratamiento_datos' => true]))->assertOk();
+        $fecha = PostulacionDatosPersonales::firstOrFail()->acepta_tratamiento_datos_at;
+
+        $this->guardar($aspirante, $postulacion, $this->cuerpo(['nombres' => 'Otro nombre', 'acepta_tratamiento_datos' => false]))
+            ->assertOk()
+            ->assertJsonPath('data.completo', true);
+
+        $this->assertEquals($fecha, PostulacionDatosPersonales::firstOrFail()->acepta_tratamiento_datos_at);
     }
 
     public function test_rechaza_catalogos_invalidos(): void

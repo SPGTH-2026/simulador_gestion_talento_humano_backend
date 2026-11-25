@@ -50,7 +50,10 @@ class DatosPersonalesDePostulacion
             $registro->{$campo} = $esMenor ? trim($datos[$campo] ?? '') : null;
         }
 
-        $registro->acepta_tratamiento_datos_at ??= now();
+        // La autorización se registra al marcarla y no se revoca guardando de nuevo: conserva la fecha de la primera vez.
+        if (! empty($datos['acepta_tratamiento_datos'])) {
+            $registro->acepta_tratamiento_datos_at ??= now();
+        }
 
         DB::transaction(function () use ($registro, $postulacion, $sexoId): void {
             $registro->save();
@@ -72,7 +75,8 @@ class DatosPersonalesDePostulacion
         $datos = $postulacion->datosPersonales;
 
         return [
-            'completo' => $datos !== null,
+            // «Completo» = datos guardados Y autorización dada: es lo que permite pasar a documentos y enviar.
+            'completo' => $datos?->acepta_tratamiento_datos_at !== null,
             'es_menor' => $datos?->esMenor() ?? false,
             'edad_minima' => PostulacionDatosPersonales::EDAD_MINIMA,
             'datos' => $datos ? [
@@ -90,7 +94,7 @@ class DatosPersonalesDePostulacion
                 'representante_documento' => $datos->representante_documento,
                 'representante_telefono' => $datos->representante_telefono,
                 'representante_parentesco' => $datos->representante_parentesco,
-                'acepta_tratamiento_datos' => true,
+                'acepta_tratamiento_datos' => $datos->acepta_tratamiento_datos_at !== null,
             ] : null,
         ];
     }

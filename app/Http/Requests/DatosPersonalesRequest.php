@@ -9,7 +9,7 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 /**
- * Datos personales de una postulación. La pertenencia de la postulación y si es editable las resuelve el controlador
+ * Datos personales de una postulación. Se guardan a medida que se completan (no exigen la autorización de tratamiento, que se registra aparte y es lo que habilita el envío). La pertenencia de la postulación y si es editable las resuelve el controlador
  * antes que esta validación (una postulación ajena responde 404, no 422).
  *
  * Reglas de edad: con menos de 16 años no se puede continuar; con 16 o 17 el representante legal es obligatorio.
@@ -48,7 +48,8 @@ class DatosPersonalesRequest extends FormRequest
             'representante_documento' => ['nullable', 'string', 'regex:'.self::DOCUMENTO],
             'representante_telefono' => ['nullable', 'string', 'regex:'.self::TELEFONO],
             'representante_parentesco' => ['nullable', 'string', 'min:3', 'max:40'],
-            'acepta_tratamiento_datos' => ['required', 'accepted'],
+            // La autorización se registra aparte de los datos: puede llegar marcada o no. Una vez dada no se revoca por aquí.
+            'acepta_tratamiento_datos' => ['sometimes', 'boolean'],
         ];
     }
 
@@ -99,7 +100,6 @@ class DatosPersonalesRequest extends FormRequest
             'date_format' => 'La fecha de nacimiento debe tener formato AAAA-MM-DD.',
             'before' => 'La fecha de nacimiento debe ser anterior a hoy.',
             'after' => 'La fecha de nacimiento no es válida.',
-            'accepted' => 'Debes autorizar el tratamiento de tus datos personales para continuar.',
             'departamento.exists' => 'Selecciona un departamento de la lista.',
             'municipio.exists' => 'Selecciona un municipio de la lista que pertenezca al departamento elegido.',
         ];

@@ -187,9 +187,15 @@ class PostulacionEstadoController extends Controller
         }
 
         // 4) Datos personales: sin ellos no se sabe si es menor ni si la libreta aplica.
-        if (! $postulacion->datosPersonales()->exists()) {
+        $datosPersonales = $postulacion->datosPersonales()->first();
+        if (! $datosPersonales) {
             throw ValidationException::withMessages([
                 'datos_personales' => 'Debes llenar tus datos personales antes de enviar la postulación.',
+            ]);
+        }
+        if ($datosPersonales->acepta_tratamiento_datos_at === null) {
+            throw ValidationException::withMessages([
+                'datos_personales' => 'Debes autorizar el tratamiento de tus datos personales antes de enviar la postulación.',
             ]);
         }
 
