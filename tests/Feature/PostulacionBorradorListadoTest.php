@@ -4,11 +4,13 @@ namespace Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Concerns\PostulacionBorradorAyudas;
+use Tests\Concerns\DatosPersonalesAyudas;
 use Tests\TestCase;
 
 class PostulacionBorradorListadoTest extends TestCase
 {
     use RefreshDatabase;
+    use DatosPersonalesAyudas;
     use PostulacionBorradorAyudas;
 
     public function test_un_borrador_no_entra_a_revision(): void
@@ -19,6 +21,7 @@ class PostulacionBorradorListadoTest extends TestCase
         $revisor = $this->revisor($ficha);
         $convocatoria = $this->convocatoriaAbierta($ficha, $instructor);
         $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $this->conDatosPersonales($postulacion);
 
         $this->actingAs($revisor)
             ->getJson("/api/revision/postulaciones/{$postulacion->id}/documentos")
@@ -35,6 +38,7 @@ class PostulacionBorradorListadoTest extends TestCase
         $aspirante = $this->aspirante($ficha);
         $convocatoria = $this->convocatoriaAbierta($ficha, $instructor);
         $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $this->conDatosPersonales($postulacion);
 
         $this->actingAs($aspirante)
             ->getJson('/api/postulaciones')
@@ -51,6 +55,7 @@ class PostulacionBorradorListadoTest extends TestCase
         $aspirante = $this->aspirante($ficha);
         $convocatoria = $this->convocatoriaAbierta($ficha, $instructor);
         $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $this->conDatosPersonales($postulacion);
 
         $this->actingAs($aspirante)
             ->getJson("/api/convocatorias/{$convocatoria->id}")
@@ -66,6 +71,7 @@ class PostulacionBorradorListadoTest extends TestCase
         $aspirante = $this->aspirante($ficha);
         $convocatoria = $this->convocatoriaAbierta($ficha, $instructor);
         $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $this->conDatosPersonales($postulacion);
 
         $this->actingAs($instructor)
             ->getJson("/api/convocatorias/{$convocatoria->id}")

@@ -6,6 +6,8 @@ use App\Enums\PostulacionEstado;
 use App\Models\Parametro;
 use App\Models\PerfilAspirante;
 use App\Models\Postulacion;
+use App\Services\Documentos\ReglaLibreta;
+use App\Services\DocumentosDePostulacion;
 use Illuminate\Http\Request;
 
 trait ValidaEvaluacion
@@ -44,7 +46,14 @@ trait ValidaEvaluacion
         $postulacion->loadMissing('documentos', 'convocatoria.documentos');
 
         $cargados = $postulacion->documentos->whereNotNull('parametro_id')->pluck('parametro_id')->map(fn ($id) => (int) $id)->all();
-        $faltantes = collect(array_keys($this->pesosDocumentos($postulacion)))
+        $autorizacion = app(DocumentosDePostulacion::class)->autorizacionRequerida($postulacion);
+        // La autorización de un menor no pesa en el cumplimiento, pero sí cuenta como obligatoria para poder finalizar.
+        $obligatorios = array_keys($this->pesosDocumentos($postulacion));
+        if ($autorizacion) {
+            $obligatorios[] = (int) $autorizacion->id;
+        }
+
+        $faltantes = collect($obligatorios)
             ->reject(fn (int $id) => in_array($id, $cargados, true))
             ->values();
 
@@ -52,7 +61,9 @@ trait ValidaEvaluacion
             return;
         }
 
-        $nombres = fn ($ids) => $postulacion->convocatoria->documentos->whereIn('id', $ids)->pluck('nombre')->implode(', ');
+        $nombres = fn ($ids) => $postulacion->convocatoria->documentos->whereIn('id', $ids)->pluck('nombre')
+            ->when($autorizacion && $ids->contains((int) $autorizacion->id), fn ($n) => $n->push($autorizacion->nombre))
+            ->implode(', ');
 
         $marcados = $faltantes->filter(fn (int $id) => ! empty($perfil["doc-{$id}"]))->values();
         if ($marcados->isNotEmpty()) {
@@ -120,14 +131,14 @@ trait ValidaEvaluacion
             ->with('sexo')
             ->first();
 
-        $sexoMujer = $perfil?->sexo?->codigo === 'mujer';
+        $libretaNoAplica = ReglaLibreta::noAplica($perfil, $postulacion->datosPersonales);
 
-        $documentos = $documentos->filter(function (Parametro $documento) use ($sexoMujer) {
+        $documentos = $documentos->filter(function (Parametro $documento) use ($libretaNoAplica) {
             if (! (bool) $documento->pivot->obligatorio) {
                 return false;
             }
 
-            return ! ($documento->codigo === Parametro::DOC_LIBRETA_MILITAR && $sexoMujer);
+            return ! ($documento->codigo === Parametro::DOC_LIBRETA_MILITAR && $libretaNoAplica);
         });
 
         if ($documentos->isEmpty()) {

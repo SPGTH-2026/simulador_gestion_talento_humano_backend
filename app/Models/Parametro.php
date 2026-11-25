@@ -21,6 +21,12 @@ class Parametro extends Model
     public const DOC_LIBRETA_MILITAR = 'libreta_militar';
     public const DOC_TARJETA_PROFESIONAL = 'tarjeta_profesional';
 
+    /**
+     * Requisito por edad, no un documento de la convocatoria: lo exige el sistema a los menores de 18 años. No lo
+     * elige el gestor, no tiene porcentaje y no entra en el puntaje de la evaluación.
+     */
+    public const DOC_AUTORIZACION_REPRESENTANTE = 'autorizacion_representante';
+
     protected $fillable = ['tema_id', 'codigo', 'nombre', 'orden', 'activo', 'es_sistema', 'es_defecto', 'creado_por'];
 
     /** Fichas a las que pertenece un documento creado por un gestor. Sin filas = documento global (sistema o anterior). */
@@ -45,6 +51,12 @@ class Parametro extends Model
                 ->orWhere('creado_por', $usuario->id)
                 ->orWhereHas('fichas', fn (Builder $f) => $f->whereIn('fichas.id', $usuario->fichaIds()));
         });
+    }
+
+    /** Parámetros que un gestor puede asignar a una convocatoria (excluye los requisitos por edad, que pone el sistema). */
+    public function scopeAsignablesAConvocatoria(Builder $query): Builder
+    {
+        return $query->where(fn (Builder $w) => $w->whereNull('codigo')->orWhere('codigo', '!=', self::DOC_AUTORIZACION_REPRESENTANTE));
     }
 
     protected function casts(): array

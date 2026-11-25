@@ -16,9 +16,11 @@ use App\Http\Controllers\Api\PerfilAspiranteController;
 use App\Http\Controllers\Api\PortafolioController;
 use App\Http\Controllers\Api\PostulacionController;
 use App\Http\Controllers\Api\PostulacionEstadoController;
+use App\Http\Controllers\Api\PostulacionDatosPersonalesController;
 use App\Http\Controllers\Api\PostulacionDocumentoController;
 use App\Http\Controllers\Api\PostulacionSkillController;
 use App\Http\Controllers\Api\SocialAuthController;
+use App\Http\Controllers\Api\UbicacionController;
 use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
 
@@ -158,10 +160,22 @@ Route::middleware(['auth:sanctum', 'verified', 'ficha'])->group(function () {
     // con la convocatoria publicada y dentro de la ventana, en 'borrador',
     // 'postulada' o 'retirada'.
     Route::middleware('can:propio:documentos')->group(function () {
-        // Perfil mínimo del aspirante (sexo), prellenado entre postulaciones.
-        // Elegir el sexo NO crea postulación: es del perfil del usuario.
+        // Perfil mínimo del aspirante (sexo). Se conserva por compatibilidad: el sexo ahora se pide dentro de los datos
+        // personales de cada postulación.
+        // Departamentos y municipios de Colombia (DIVIPOLA) para el formulario de datos personales.
+        Route::get('ubicaciones/departamentos', [UbicacionController::class, 'departamentos']);
+        Route::get('ubicaciones/departamentos/{departamento}/municipios', [UbicacionController::class, 'municipios'])
+            ->where('departamento', '[0-9]{2}');
+
         Route::get('perfil', [PerfilAspiranteController::class, 'show']);
         Route::put('perfil/sexo', [PerfilAspiranteController::class, 'sexo']);
+
+        Route::get('postulaciones/{postulacion}/datos-personales', [PostulacionDatosPersonalesController::class, 'show'])
+            ->whereNumber('postulacion')
+            ->missing(fn () => abort(404, 'Postulación no encontrada.'));
+        Route::put('postulaciones/{postulacion}/datos-personales', [PostulacionDatosPersonalesController::class, 'update'])
+            ->whereNumber('postulacion')
+            ->missing(fn () => abort(404, 'Postulación no encontrada.'));
 
         Route::get('postulaciones/{postulacion}/documentos', [PostulacionDocumentoController::class, 'show'])
             ->whereNumber('postulacion')

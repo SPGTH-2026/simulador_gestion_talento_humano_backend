@@ -10,6 +10,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Tests\Concerns\EvaluacionAyudas;
+use Tests\Concerns\DatosPersonalesAyudas;
 use Tests\TestCase;
 
 /**
@@ -18,6 +19,7 @@ use Tests\TestCase;
 class NotificacionesPorRolTest extends TestCase
 {
     use RefreshDatabase;
+    use DatosPersonalesAyudas;
     use EvaluacionAyudas;
 
     /** Personal de la ficha 2896411 y gente que NO debe recibir nada de ella. */
@@ -77,6 +79,7 @@ class NotificacionesPorRolTest extends TestCase
         $convocatoria = $this->convocatoriaAbierta($p['ficha'], $p['instructor']);
         $postulacion = $this->conDocumentosCargados($this->postulacion($convocatoria, $p['aspirante']));
         $postulacion->update(['estado_id' => $this->parametroId('estado_postulacion', 'borrador')]);
+        $this->conDatosPersonales($postulacion);
 
         $this->actingAs($p['aspirante'])->postJson("/api/postulaciones/{$postulacion->id}/enviar")->assertOk();
 
@@ -205,6 +208,7 @@ class NotificacionesPorRolTest extends TestCase
         $convocatoria = $this->convocatoriaAbierta($p['ficha'], $p['instructor']);
         $postulacion = $this->conDocumentosCargados($this->postulacion($convocatoria, $p['aspirante']));
         $postulacion->update(['estado_id' => $this->parametroId('estado_postulacion', 'borrador')]);
+        $this->conDatosPersonales($postulacion);
 
         $this->actingAs($p['aspirante'])->postJson("/api/postulaciones/{$postulacion->id}/enviar")->assertOk();
         $this->actingAs($p['aspirante'])->patchJson("/api/postulaciones/{$postulacion->id}/estado", ['estado' => 'retirada'])

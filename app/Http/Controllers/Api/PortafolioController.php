@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Parametro;
 use App\Models\Postulacion;
 use App\Models\User;
+use App\Services\Documentos\ReglaLibreta;
 use App\Services\DocumentosDePostulacion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -38,7 +39,7 @@ class PortafolioController extends Controller
         // el portafolio. Las filas no se borran: al reactivarlo vuelven a aparecer.
         // Solo las postulaciones a convocatorias de una ficha que el actor puede ver (el super admin ve todas).
         $consulta = Postulacion::query()
-            ->with(['estado', 'convocatoria.estado', 'convocatoria.documentos', 'documentos', 'skills'])
+            ->with(['estado', 'convocatoria.estado', 'convocatoria.documentos', 'documentos', 'skills', 'datosPersonales'])
             ->where('user_id', $user->id)
             ->orderByDesc('fecha_postulacion')
             ->orderByDesc('id');
@@ -51,7 +52,7 @@ class PortafolioController extends Controller
 
         // Dos consultas en total (no una por postulación), con la misma regla de «completo» que el envío y la libreta.
         $completos = $postulaciones->isEmpty() ? [] : $this->documentos->completosPara($postulaciones);
-        $sexoMujer = $user->perfilAspirante()->with('sexo')->first()?->sexo?->codigo === 'mujer';
+        $perfil = $user->perfilAspirante()->with('sexo')->first();
         $veCodigo = $actor->role !== Role::Aprendiz;
 
         return response()->json([
@@ -69,19 +70,19 @@ class PortafolioController extends Controller
                         : null,
                 ],
                 'postulaciones' => $postulaciones
-                    ->map(fn (Postulacion $p) => $this->resumenPostulacion($p, (bool) ($completos[$p->id] ?? false), $sexoMujer, $veCodigo))
+                    ->map(fn (Postulacion $p) => $this->resumenPostulacion($p, (bool) ($completos[$p->id] ?? false), ReglaLibreta::noAplica($perfil, $p->datosPersonales), $veCodigo))
                     ->values(),
             ],
         ]);
     }
 
     /** Tarjeta de una postulación: lo que pinta el listado del portafolio. */
-    private function resumenPostulacion(Postulacion $p, bool $completo, bool $sexoMujer, bool $veCodigo): array
+    private function resumenPostulacion(Postulacion $p, bool $completo, bool $libretaNoAplica, bool $veCodigo): array
     {
-        // La libreta militar no se cuenta como requerida para una aspirante mujer (misma regla que DocumentosDePostulacion).
+        // La libreta militar no se cuenta como requerida si no aplica (misma regla que DocumentosDePostulacion).
         $requeridos = $p->convocatoria->documentos
             ->filter(fn ($parametro) => (bool) $parametro->pivot->obligatorio)
-            ->reject(fn ($parametro) => $sexoMujer && $parametro->codigo === Parametro::DOC_LIBRETA_MILITAR);
+            ->reject(fn ($parametro) => $libretaNoAplica && $parametro->codigo === Parametro::DOC_LIBRETA_MILITAR);
         $subidosPorParametro = $p->documentos
             ->whereNotNull('parametro_id')
             ->pluck('parametro_id');

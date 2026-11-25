@@ -5,11 +5,13 @@ namespace Tests\Feature;
 use App\Models\Postulacion;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Concerns\PostulacionBorradorAyudas;
+use Tests\Concerns\DatosPersonalesAyudas;
 use Tests\TestCase;
 
 class PostulacionBorradorCrearTest extends TestCase
 {
     use RefreshDatabase;
+    use DatosPersonalesAyudas;
     use PostulacionBorradorAyudas;
 
     public function test_el_post_crea_el_borrador_con_201(): void
@@ -56,6 +58,7 @@ class PostulacionBorradorCrearTest extends TestCase
         // Obligatorio opcional: no bloquea el envío. Sin obligatorios, envía.
         $convocatoria = $this->convocatoriaAbierta($ficha, $instructor);
         $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $this->conDatosPersonales($postulacion);
 
         $respuesta = $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/enviar")
@@ -80,6 +83,7 @@ class PostulacionBorradorCrearTest extends TestCase
         $convocatoria->documentos()->attach($this->parametroId('tipo_documento', 'hoja_de_vida'), ['obligatorio' => true]);
         $convocatoria->documentos()->attach($this->parametroId('tipo_documento', 'certificados_academicos'), ['obligatorio' => false]);
         $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $this->conDatosPersonales($postulacion);
 
         $respuesta = $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/enviar")
@@ -100,6 +104,7 @@ class PostulacionBorradorCrearTest extends TestCase
         $convocatoria = $this->convocatoriaAbierta($ficha, $instructor);
         $convocatoria->documentos()->attach($this->parametroId('tipo_documento', 'certificados_academicos'), ['obligatorio' => false]);
         $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $this->conDatosPersonales($postulacion);
 
         $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/enviar")
@@ -115,6 +120,7 @@ class PostulacionBorradorCrearTest extends TestCase
         $convocatoria = $this->convocatoriaAbierta($ficha, $instructor);
         $convocatoria->documentos()->attach($this->parametroId('tipo_documento', 'hoja_de_vida'), ['obligatorio' => true]);
         $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $this->conDatosPersonales($postulacion);
 
         $this->subirDocumento($aspirante, $postulacion, 'hoja_de_vida');
 

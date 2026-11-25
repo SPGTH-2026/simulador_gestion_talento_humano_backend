@@ -6,6 +6,7 @@ use App\Models\Evaluacion;
 use App\Models\Parametro;
 use App\Models\Postulacion;
 use App\Models\User;
+use App\Services\Documentos\ReglaLibreta;
 use App\Services\RondasCorreccion;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -43,11 +44,11 @@ trait PresentaEvaluacion
         // aspirante ya cargó (misma regla que el cálculo del 60 %). No existe
         // un estado de validación en la base: "cargado" es lo único que se
         // puede afirmar. La libreta militar de una mujer no aplica.
-        $sexoMujer = $p->user?->perfilAspirante?->sexo?->codigo === 'mujer';
+        $libretaNoAplica = ReglaLibreta::noAplica($p->user?->perfilAspirante, $p->datosPersonales);
 
         $requeridos = ($p->convocatoria?->documentos ?? collect())
             ->filter(fn (Parametro $d) => (bool) $d->pivot->obligatorio
-                && ! ($d->codigo === Parametro::DOC_LIBRETA_MILITAR && $sexoMujer));
+                && ! ($d->codigo === Parametro::DOC_LIBRETA_MILITAR && $libretaNoAplica));
 
         $docsRequeridos = $requeridos->count();
         $docsCargados = $p->documentos

@@ -8,11 +8,13 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Tests\Concerns\PostulacionBorradorAyudas;
+use Tests\Concerns\DatosPersonalesAyudas;
 use Tests\TestCase;
 
 class PostulacionBorradorVentanaTest extends TestCase
 {
     use RefreshDatabase;
+    use DatosPersonalesAyudas;
     use PostulacionBorradorAyudas;
 
     public function test_enviar_con_la_ventana_cerrada_devuelve_422(): void
@@ -26,6 +28,7 @@ class PostulacionBorradorVentanaTest extends TestCase
             'fecha_cierre' => now('America/Bogota')->subDay()->toDateString(),
         ]);
         $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $this->conDatosPersonales($postulacion);
 
         $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/enviar")
@@ -43,6 +46,7 @@ class PostulacionBorradorVentanaTest extends TestCase
         $aspirante = $this->aspirante($ficha);
         $convocatoria = $this->crearConvocatoria($ficha, $instructor); // borrador
         $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $this->conDatosPersonales($postulacion);
 
         $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/enviar")
@@ -57,6 +61,7 @@ class PostulacionBorradorVentanaTest extends TestCase
         $aspirante = $this->aspirante($ficha);
         $convocatoria = $this->convocatoriaAbierta($ficha, $instructor);
         $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $this->conDatosPersonales($postulacion);
         $postuladaId = $this->parametroId('estado_postulacion', 'postulada');
 
         // Otra petición envía/gana la carrera antes del UPDATE condicionado.
@@ -86,6 +91,7 @@ class PostulacionBorradorVentanaTest extends TestCase
         $convocatoria = $this->convocatoriaAbierta($ficha, $instructor);
         $convocatoria->documentos()->attach($this->parametroId('tipo_documento', 'hoja_de_vida'), ['obligatorio' => true]);
         $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $this->conDatosPersonales($postulacion);
 
         $this->actingAs($aspirante)
             ->getJson("/api/postulaciones/{$postulacion->id}/documentos")

@@ -49,6 +49,12 @@ if [ "${SKIP_MIGRATIONS:-false}" != "true" ]; then
   php artisan db:seed --class=ParametroSeeder --force
 fi
 
+# Departamentos y municipios de Colombia (DIVIPOLA, DANE) para el formulario de datos personales. Idempotente (upsert por
+# código): se puede correr en cada arranque.
+if [ "${SKIP_MIGRATIONS:-false}" != "true" ]; then
+  php artisan db:seed --class=UbicacionSeeder --force
+fi
+
 # Super admin garantizado del sistema: idempotente, asegura la cuenta con su
 # rol en CADA arranque. Lee credenciales de SUPER_ADMIN_EMAIL/PASSWORD.
 if [ "${SKIP_MIGRATIONS:-false}" != "true" ]; then
