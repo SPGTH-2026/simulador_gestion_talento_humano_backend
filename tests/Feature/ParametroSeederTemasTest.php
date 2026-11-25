@@ -13,7 +13,7 @@ class ParametroSeederTemasTest extends TestCase
     use RefreshDatabase;
     use ParametroSeederAyudas;
 
-    public function test_crea_los_diez_temas_con_su_codigo(): void
+    public function test_crea_los_doce_temas_con_su_codigo(): void
     {
         $this->ejecutarSeeder();
 
@@ -28,13 +28,15 @@ class ParametroSeederTemasTest extends TestCase
             'sexo',
             'skill_tecnica',
             'skill_catalogo',
+            'tipo_documento_identidad',
+            'nivel_formacion',
         ];
 
         foreach ($esperados as $codigo) {
             $this->assertDatabaseHas('parametro_temas', ['codigo' => $codigo, 'activo' => 1]);
         }
 
-        $this->assertSame(10, ParametroTema::count());
+        $this->assertSame(12, ParametroTema::count());
     }
 
     public function test_crea_la_cantidad_esperada_de_parametros_por_tema(): void
@@ -45,13 +47,15 @@ class ParametroSeederTemasTest extends TestCase
             'estado_convocatoria' => 4,
             'estado_postulacion' => 3,
             'tipo_convocatoria' => 2,
-            'tipo_documento' => 6,
+            'tipo_documento' => 7,
             'tipo_empleo' => 3,
             'tipo_contrato' => 4,
             'modalidad' => 3,
             'sexo' => 2,
             'skill_tecnica' => 6,
             'skill_catalogo' => 10,
+            'tipo_documento_identidad' => 5,
+            'nivel_formacion' => 5,
         ];
 
         foreach ($esperados as $tema => $cantidad) {
@@ -62,7 +66,7 @@ class ParametroSeederTemasTest extends TestCase
             );
         }
 
-        $this->assertSame(43, Parametro::count());
+        $this->assertSame(54, Parametro::count());
     }
 
     public function test_valores_de_sistema_quedan_con_codigo_activos_y_es_sistema(): void
@@ -95,8 +99,8 @@ class ParametroSeederTemasTest extends TestCase
         $this->ejecutarSeeder();
         $this->ejecutarSeeder();
 
-        $this->assertSame(10, ParametroTema::count());
-        $this->assertSame(43, Parametro::count());
+        $this->assertSame(12, ParametroTema::count());
+        $this->assertSame(54, Parametro::count());
     }
 
     /**

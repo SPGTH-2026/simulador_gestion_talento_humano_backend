@@ -6,6 +6,7 @@ use App\Models\Convocatoria;
 use App\Models\Parametro;
 use App\Models\PerfilAspirante;
 use App\Models\Postulacion;
+use App\Services\Documentos\ReglaLibreta;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 
@@ -19,9 +20,11 @@ use Illuminate\Support\Collection;
  */
 class DocumentosDePostulacion
 {
+    private ?Parametro $autorizacion = null;
+
     /** Motivo que acompaña a la libreta cuando el aspirante no ha registrado sexo. */
     public const MOTIVO_FALTA_SEXO =
-        'Indica tu sexo para saber si aplica la libreta militar.';
+        'Llena tus datos personales para saber si aplica la libreta militar.';
 
     /**
      * Faltantes que impiden enviar: documentos OBLIGATORIOS de la convocatoria
@@ -33,7 +36,7 @@ class DocumentosDePostulacion
      */
     public function faltantes(Postulacion $postulacion): array
     {
-        $postulacion->loadMissing(['convocatoria.documentos', 'documentos']);
+        $postulacion->loadMissing(['convocatoria.documentos', 'documentos', 'datosPersonales']);
 
         $perfil = PerfilAspirante::query()
             ->where('user_id', $postulacion->user_id)
@@ -55,7 +58,7 @@ class DocumentosDePostulacion
             return [];
         }
 
-        $postulaciones->loadMissing(['convocatoria.documentos', 'documentos']);
+        $postulaciones->loadMissing(['convocatoria.documentos', 'documentos', 'datosPersonales']);
 
         $perfiles = PerfilAspirante::query()
             ->whereIn('user_id', $postulaciones->pluck('user_id')->unique()->all())
@@ -87,7 +90,7 @@ class DocumentosDePostulacion
         }
 
         $convocatoria->loadMissing('documentos');
-        $postulaciones->load(['documentos' => fn ($q) => $q->select('id', 'postulacion_id', 'parametro_id')]);
+        $postulaciones->load(['documentos' => fn ($q) => $q->select('id', 'postulacion_id', 'parametro_id'), 'datosPersonales']);
 
         $exigeLibreta = $convocatoria->documentos->contains(
             fn (Parametro $d) => $d->codigo === Parametro::DOC_LIBRETA_MILITAR && (bool) $d->pivot->obligatorio,
@@ -116,7 +119,7 @@ class DocumentosDePostulacion
      */
     private function faltantesCon(Postulacion $postulacion, ?PerfilAspirante $perfil): array
     {
-        $sexoMujer = $perfil?->sexo?->codigo === 'mujer';
+        $libretaNoAplica = ReglaLibreta::noAplica($perfil, $postulacion->datosPersonales);
 
         $subidos = $postulacion->documentos
             ->whereNotNull('parametro_id')
@@ -129,8 +132,8 @@ class DocumentosDePostulacion
                 continue;
             }
 
-            // La libreta de una mujer no se exige: no es un faltante.
-            if ($parametro->codigo === Parametro::DOC_LIBRETA_MILITAR && $sexoMujer) {
+            // La libreta no se exige a mujeres ni a menores de 18: no es un faltante.
+            if ($parametro->codigo === Parametro::DOC_LIBRETA_MILITAR && $libretaNoAplica) {
                 continue;
             }
 
@@ -151,7 +154,27 @@ class DocumentosDePostulacion
             $faltantes[] = $faltante;
         }
 
+        // Un menor de edad también debe subir la autorización de su representante (requisito por edad, sin porcentaje).
+        $autorizacion = $postulacion->datosPersonales?->esMenor() ? $this->autorizacionRepresentante() : null;
+        if ($autorizacion && ! $subidos->has($autorizacion->id)) {
+            $faltantes[] = ['codigo' => $autorizacion->codigo, 'nombre' => $autorizacion->nombre];
+        }
+
         return $faltantes;
+    }
+
+    /** La autorización que EXIGE esta postulación: solo si la persona es menor de edad; null en los demás casos. */
+    public function autorizacionRequerida(Postulacion $postulacion): ?Parametro
+    {
+        $postulacion->loadMissing('datosPersonales');
+
+        return $postulacion->datosPersonales?->esMenor() ? $this->autorizacionRepresentante() : null;
+    }
+
+    /** Parámetro de la autorización del representante (se resuelve una vez por instancia del servicio). */
+    public function autorizacionRepresentante(): ?Parametro
+    {
+        return $this->autorizacion ??= Parametro::porTemaYCodigo('tipo_documento', Parametro::DOC_AUTORIZACION_REPRESENTANTE);
     }
 
     /** ¿Están todos los obligatorios subidos o en 'no_aplica'? */

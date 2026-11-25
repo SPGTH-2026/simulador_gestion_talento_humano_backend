@@ -49,7 +49,7 @@ class PostulacionLibretaYCompletoTest extends TestCase
                 'codigo' => 'libreta_militar', 'archivo' => $this->pdf(),
             ])
             ->assertStatus(422)
-            ->assertJsonPath('errors.codigo.0', 'Antes de subir la libreta militar debes indicar tu sexo.');
+            ->assertJsonPath('errors.codigo.0', 'Antes de subir la libreta militar debes llenar tus datos personales.');
     }
 
     public function test_hombre_con_sexo_registrado_puede_subir_la_libreta(): void

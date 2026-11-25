@@ -33,6 +33,7 @@ class EvaluacionListadoController extends Controller
             ->with([
                 'user:id,name,email,ficha_id',
                 'user.perfilAspirante.sexo',
+                'datosPersonales',
                 'convocatoria:id,nombre,cargo,estado_id,ficha_id,fecha_evaluacion',
                 'convocatoria.estado:id,codigo,nombre',
                 'convocatoria.documentos',

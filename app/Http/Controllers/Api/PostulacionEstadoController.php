@@ -186,7 +186,14 @@ class PostulacionEstadoController extends Controller
             ]);
         }
 
-        // 4) Documentos obligatorios: subidos o no_aplica (libreta de mujer).
+        // 4) Datos personales: sin ellos no se sabe si es menor ni si la libreta aplica.
+        if (! $postulacion->datosPersonales()->exists()) {
+            throw ValidationException::withMessages([
+                'datos_personales' => 'Debes llenar tus datos personales antes de enviar la postulación.',
+            ]);
+        }
+
+        // 4b) Documentos obligatorios: subidos o no_aplica (libreta de mujer o de menor).
         $faltantes = $documentos->faltantes($postulacion);
 
         if ($faltantes !== []) {

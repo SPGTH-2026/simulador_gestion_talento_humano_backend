@@ -54,11 +54,12 @@ trait DocumentosDeConvocatoria
                     ->whereKey($referencia)
                     ->whereHas('tema', fn ($q) => $q->where('codigo', 'tipo_documento'))
                     ->where('activo', true)
+                    ->asignablesAConvocatoria()
                     ->when(request()->user(), fn ($q, $usuario) => $q->visiblesPara($usuario))
                     ->first();
             } elseif (is_string($referencia) && $referencia !== '') {
                 $parametro = Parametro::porTemaYCodigo('tipo_documento', $referencia);
-                if ($parametro && ! $parametro->activo) {
+                if ($parametro && (! $parametro->activo || $parametro->codigo === Parametro::DOC_AUTORIZACION_REPRESENTANTE)) {
                     $parametro = null;
                 }
             }

@@ -117,6 +117,10 @@ class RondasCorreccion
 
         $marcados = array_values(array_unique(array_map('intval', $marcados)));
         $validos = $postulacion->convocatoria->documentos()->pluck('parametros.id')->map(fn ($id) => (int) $id)->all();
+        // La autorización del representante de un menor también se puede devolver para corregir (requisito por edad).
+        if ($autorizacion = app(DocumentosDePostulacion::class)->autorizacionRequerida($postulacion)) {
+            $validos[] = (int) $autorizacion->id;
+        }
         if ($marcados === [] || array_diff($marcados, $validos) !== []) {
             $this->rechazar('Marca con "No cumple" al menos un documento de la convocatoria que el aspirante deba corregir.');
         }

@@ -38,7 +38,7 @@ final class EscribeDocumentoPostulacion
         UploadedFile $archivo,
         ?CorreccionPostulacion $correccion,
     ): array {
-        if (! $parametro || ! $this->convocatoriaPide($postulacion, $parametro->id)) {
+        if (! $parametro || ! $this->documentoAplica($postulacion, $parametro)) {
             throw ValidationException::withMessages([
                 $campo => 'Ese documento no hace parte de esta convocatoria.',
             ]);
@@ -203,6 +203,21 @@ final class EscribeDocumentoPostulacion
         }
     }
 
+    /**
+     * ¿Se puede subir este documento a la postulación? Los de la convocatoria, sí; la autorización del representante
+     * solo si la persona es menor de edad (no pertenece a la convocatoria: la exige el sistema por la edad).
+     */
+    private function documentoAplica(Postulacion $postulacion, Parametro $parametro): bool
+    {
+        if ($parametro->codigo === Parametro::DOC_AUTORIZACION_REPRESENTANTE) {
+            $postulacion->loadMissing('datosPersonales');
+
+            return $postulacion->datosPersonales?->esMenor() ?? false;
+        }
+
+        return $this->convocatoriaPide($postulacion, $parametro->id);
+    }
+
     /** ¿La convocatoria de la postulación pide este tipo de documento? */
     private function convocatoriaPide(Postulacion $postulacion, int $parametroId): bool
     {
@@ -221,13 +236,19 @@ final class EscribeDocumentoPostulacion
 
         if (! $perfil) {
             throw ValidationException::withMessages([
-                'codigo' => 'Antes de subir la libreta militar debes indicar tu sexo.',
+                'codigo' => 'Antes de subir la libreta militar debes llenar tus datos personales.',
             ]);
         }
 
         if ($perfil->sexo?->codigo === 'mujer') {
             throw ValidationException::withMessages([
                 'codigo' => 'La libreta militar no aplica: tu perfil está registrado como femenino.',
+            ]);
+        }
+
+        if (ReglaLibreta::noAplica($perfil, $postulacion->datosPersonales)) {
+            throw ValidationException::withMessages([
+                'codigo' => 'La libreta militar no aplica: eres menor de edad.',
             ]);
         }
     }

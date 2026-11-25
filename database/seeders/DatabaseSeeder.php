@@ -126,6 +126,9 @@ class DatabaseSeeder extends Seeder
         // Idempotente: se puede correr varias veces sin duplicar.
         $this->call(ParametroSeeder::class);
 
+        // Departamentos y municipios de Colombia (DIVIPOLA). Idempotente.
+        $this->call(UbicacionSeeder::class);
+
         // Andamio del módulo de Evaluación: convocatoria + aspirantes postulados.
         $this->call(EvaluacionDemoSeeder::class);
 
