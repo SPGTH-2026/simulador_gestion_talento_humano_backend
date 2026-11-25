@@ -88,6 +88,8 @@ trait PresentaEvaluacion
                     'nombre' => $cs->nombre,
                     'declarada' => $declarada !== null,
                     'certificada' => $declarada?->tieneCertificado() ?? false,
+                    // Id de la habilidad del aspirante: sirve para abrir su certificado (null si no la declaró).
+                    'postulacion_skill_id' => $declarada?->id,
                     // Porcentaje de la habilidad (null = sin porcentaje) y lo que marcó el evaluador («skill-{id}»).
                     'ponderacion' => $cs->ponderacion !== null ? (float) $cs->ponderacion : null,
                     'marca' => $e?->perfil['skill-'.$cs->id] ?? null,
