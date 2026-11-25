@@ -12,37 +12,43 @@ use App\Services\OtpService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Socialite\Contracts\Provider;
 use Laravel\Socialite\Facades\Socialite;
+use Tests\Support\InicioOAuth;
 use Tests\TestCase;
 
 class SocialCallbackSessionTest extends TestCase
 {
+    use InicioOAuth;
     use RefreshDatabase;
 
     protected function setUp(): void
     {
         parent::setUp();
 
-        // El callback de Google es un GET sin sesión previa (viene del navegador).
-        // Este test comprueba que aun así se crea la sesión.
+        // Cada prueba empieza con el recorrido real: el inicio (/redirect) guarda el state en la sesión y el callback lo
+        // devuelve; solo se simula el canje del código con Google. Ver Tests\Support\InicioOAuth.
     }
 
+    private function correoDeAna(): string
+    {
+        return 'ana.'.getmypid().'@test.com';
+    }
+
+    /** Google «responde» con la cuenta de Ana (correo verificado por Google). */
     private function fakeSocialite(): void
     {
-        $social = new \Laravel\Socialite\Two\User;
-        $social->id = 'google-abc123';
-        $social->name = 'Ana Google';
-        $social->email = 'ana.'.getmypid().'@test.com';
-        // Google confirma el correo en su userinfo; sin esto el callback ya no crea ni enlaza la cuenta.
-        $social->user = ['email' => $social->email, 'email_verified' => true];
-
-        $provider = \Mockery::mock(Provider::class);
-        $provider->shouldReceive('stateless')->andReturnSelf();
-        $provider->shouldReceive('user')->andReturn($social);
-
-        Socialite::shouldReceive('driver')->andReturn($provider);
+        $this->googleResponde('google-abc123', $this->correoDeAna());
     }
 
-    /** Igual que fakeSocialite(), pero el canje del código falla (invalid_grant). */
+    /** Recorrido válido completo: inicio real, Google responde, y el callback llega con el state del inicio. */
+    private function callbackValido(): \Illuminate\Testing\TestResponse
+    {
+        $estado = $this->iniciarOAuth();
+        $this->fakeSocialite();
+
+        return $this->callbackConEstado($estado);
+    }
+
+    /** Google rechaza el canje del código (invalid_grant). */
     private function fakeSocialiteConError(string $mensaje = 'Malformed auth code.'): void
     {
         $provider = \Mockery::mock(Provider::class);
@@ -54,9 +60,7 @@ class SocialCallbackSessionTest extends TestCase
 
     public function test_callback_google_nuevo_no_crea_cuenta_hasta_elegir_ficha(): void
     {
-        $this->fakeSocialite();
-
-        $response = $this->get('/api/auth/google/callback');
+        $response = $this->callbackValido();
 
         $response->assertRedirect(config('app.frontend_url').'/completar-ficha?pendiente=google');
         $this->assertGuest();
@@ -68,9 +72,7 @@ class SocialCallbackSessionTest extends TestCase
     public function test_completar_pendiente_crea_aspirante_con_ficha_y_abre_sesion(): void
     {
         $ficha = \App\Models\Ficha::create(['codigo' => '3173334', 'nombre_programa' => 'ADSO']);
-        $this->fakeSocialite();
-
-        $this->get('/api/auth/google/callback');
+        $this->callbackValido();
 
         $this->getJson('/api/auth/google/pendiente')
             ->assertOk()
@@ -95,8 +97,7 @@ class SocialCallbackSessionTest extends TestCase
         $this->postJson('/api/auth/google/pendiente/ficha', ['ficha_codigo' => '3173334'])
             ->assertNotFound();
 
-        $this->fakeSocialite();
-        $this->get('/api/auth/google/callback');
+        $this->callbackValido();
 
         $this->postJson('/api/auth/google/pendiente/ficha', ['ficha_codigo' => '00000000'])
             ->assertStatus(422)
@@ -117,9 +118,7 @@ class SocialCallbackSessionTest extends TestCase
             'email_verified_at' => now(),
         ]);
 
-        $this->fakeSocialite();
-
-        $response = $this->get('/api/auth/google/callback');
+        $response = $this->callbackValido();
 
         $response->assertRedirect();
         $this->assertSame(config('app.frontend_url'), $response->headers->get('Location'));
@@ -148,9 +147,7 @@ class SocialCallbackSessionTest extends TestCase
             'provider_id' => 'google-abc123',
         ]);
 
-        $this->fakeSocialite();
-
-        $response = $this->get('/api/auth/google/callback');
+        $response = $this->callbackValido();
 
         $response->assertRedirect();
 
@@ -182,9 +179,7 @@ class SocialCallbackSessionTest extends TestCase
             'provider_id' => 'google-abc123',
         ]);
 
-        $this->fakeSocialite();
-
-        $response = $this->get('/api/auth/google/callback');
+        $response = $this->callbackValido();
 
         $response->assertRedirect();
         $this->assertStringContainsString('error=desactivado', $response->headers->get('Location'));
@@ -206,11 +201,9 @@ class SocialCallbackSessionTest extends TestCase
 
     public function test_callback_con_estado_valido_inicia_sesion(): void
     {
-        User::factory()->create(['email' => 'ana.'.getmypid().'@test.com', 'email_verified_at' => now()]);
-        $this->fakeSocialite();
+        User::factory()->create(['email' => $this->correoDeAna(), 'email_verified_at' => now()]);
 
-        $response = $this->withSession(['state' => 'estado-123'])
-            ->get('/api/auth/google/callback?code=codigo&state=estado-123');
+        $response = $this->callbackValido();
 
         $response->assertRedirect();
         $this->assertSame(config('app.frontend_url'), $response->headers->get('Location'));
@@ -219,23 +212,24 @@ class SocialCallbackSessionTest extends TestCase
 
     public function test_callback_con_estado_que_no_coincide_avisa_y_no_entra(): void
     {
-        // Código reenviado (doble clic, botón atrás): el estado no cuadra.
-        $this->fakeSocialite();
+        // Enlace reenviado o de otra pestaña: el state de la URL no es el del inicio de este navegador.
+        $this->iniciarOAuth();
+        $this->googleNoDebeConsultarse();
 
-        $response = $this->withSession(['state' => 'estado-123'])
-            ->get('/api/auth/google/callback?code=codigo&state=otro-estado');
+        $response = $this->callbackConEstado('otro-estado');
 
         $response->assertRedirect();
-        $this->assertStringContainsString('error=oauth_codigo', $response->headers->get('Location'));
+        $this->assertStringContainsString('error=oauth_estado', $response->headers->get('Location'));
         $this->assertGuest();
     }
 
     public function test_codigo_ya_usado_muestra_error_amigable_y_no_500(): void
     {
-        // Google responde invalid_grant: el código ya se gastó.
+        // El inicio es válido, pero Google responde invalid_grant: el código ya se gastó.
+        $estado = $this->iniciarOAuth();
         $this->fakeSocialiteConError('Malformed auth code.');
 
-        $response = $this->get('/api/auth/google/callback?code=codigo');
+        $response = $this->callbackConEstado($estado);
 
         $response->assertRedirect();
         $this->assertStringContainsString('error=oauth_codigo', $response->headers->get('Location'));
@@ -244,13 +238,13 @@ class SocialCallbackSessionTest extends TestCase
 
     public function test_codigo_ya_usado_con_sesion_abierta_continua_al_front(): void
     {
-        // El usuario ya entró con el primer clic; el segundo callback falla
-        // pero no debe dejarle fuera: se le lleva al front.
-        $user = User::factory()->create(['email' => 'ana.'.getmypid().'@test.com']);
+        // El usuario ya entró con el primer clic; el segundo callback no debe dejarle fuera: se le lleva al front, sin
+        // canjear nada.
+        $user = User::factory()->create(['email' => $this->correoDeAna()]);
+        $estado = $this->iniciarOAuth();
+        $this->googleNoDebeConsultarse();
 
-        $this->fakeSocialiteConError('Malformed auth code.');
-
-        $response = $this->actingAs($user)->get('/api/auth/google/callback?code=codigo');
+        $response = $this->actingAs($user)->callbackConEstado($estado);
 
         $response->assertRedirect();
         $this->assertSame(config('app.frontend_url'), $response->headers->get('Location'));
