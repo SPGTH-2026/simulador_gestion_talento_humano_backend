@@ -24,6 +24,9 @@ enum TipoNotificacion: string
     // Una evaluación finalizada aprobó el umbral: el aspirante queda disponible para selección.
     case PasaSeleccion = 'pasa_seleccion';
 
+    // Selección programó, reprogramó o canceló una cita (entrevista o prueba técnica): el aspirante la consulta en «Mis postulaciones».
+    case Citacion = 'citacion';
+
     // Estados de la convocatoria, vistos por el aspirante.
     case ConvocatoriaPublicada = 'convocatoria_publicada';
     case ConvocatoriaRecepcionCerrada = 'convocatoria_recepcion_cerrada';
