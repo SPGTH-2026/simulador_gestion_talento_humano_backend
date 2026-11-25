@@ -237,6 +237,8 @@ Route::middleware(['auth:sanctum', 'verified', 'ficha'])->group(function () {
     // Módulo de Selección y Preselección: ver routes/seleccion.php (mismo grupo de autenticación; incluye las citaciones).
     require __DIR__.'/seleccion.php';
 
+    // Textos legales y aceptaciones (apagado por defecto): ver routes/legal.php.
+    require __DIR__.'/legal.php';
 });
 
 // ── Ejemplo: cada ruta de negocio declara el permiso que exige (403 si el rol no lo tiene) ──
