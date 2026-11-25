@@ -91,6 +91,8 @@ class SocialVinculacionSeguraTest extends TestCase
         // Los datos elegidos por el atacante no se heredan: el nombre sale de Google y la ficha la elige la persona real.
         $this->assertSame('Víctima Real', $user->name);
         $this->assertNull($user->ficha_id);
+        // La contraseña ahora es generada por el sistema, no elegida por nadie: la marca lo registra.
+        $this->assertSame('sin_definir', $user->password_estado);
     }
 
     public function test_el_atacante_ya_no_puede_entrar_con_su_contrasena_despues_de_la_vinculacion(): void

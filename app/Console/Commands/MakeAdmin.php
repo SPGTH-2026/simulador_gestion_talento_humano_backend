@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\Role;
 use App\Models\User;
+use App\Services\ContrasenaDeCuenta;
 use Illuminate\Console\Command;
 use Illuminate\Support\Str;
 
@@ -38,6 +39,7 @@ class MakeAdmin extends Command
                 'name' => $email,
                 'email' => $email,
                 'password' => $password,
+                'password_estado' => ContrasenaDeCuenta::DEFINIDA, // fijada por quien ejecuta el comando
                 'role' => Role::SuperAdmin,
                 'subrole' => null,
                 'active' => true,

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\ContrasenaController;
 use App\Http\Controllers\Api\CalificacionSeleccionController;
 use App\Http\Controllers\Api\ComparacionSeleccionController;
 use App\Http\Controllers\Api\ConfiguracionSeleccionController;
@@ -54,6 +55,13 @@ Route::prefix('auth')->group(function () {
         // Confirmar correo: requieren sesión pero NO 'verified' (si no, no se podría confirmar).
         Route::post('verification/send', [AuthController::class, 'sendVerification'])->middleware('throttle:otp-send');
         Route::post('verification/confirm', [AuthController::class, 'confirmVerification'])->middleware('throttle:otp-check');
+
+        // Establecer o cambiar la contraseña desde la sesión, con código al correo de ESA sesión. Exige correo verificado y los
+        // límites existentes (otp-send / otp-check). Apagado por defecto: ver config/seguridad.php.
+        Route::middleware('verified')->prefix('password')->group(function () {
+            Route::post('codigo', [ContrasenaController::class, 'codigo'])->middleware('throttle:otp-send');
+            Route::post('establecer', [ContrasenaController::class, 'establecer'])->middleware('throttle:otp-check');
+        });
 
         // El aspirante se asocia a su ficha (Google o registro por correo).
         // Exige correo verificado: es una acción de negocio, no de autenticación.

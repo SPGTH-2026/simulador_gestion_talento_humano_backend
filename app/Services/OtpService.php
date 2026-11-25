@@ -15,6 +15,9 @@ class OtpService
 
     public const VERIFY_EMAIL = 'verify_email';
 
+    /** Establecer o cambiar la contraseña desde una sesión abierta (propósito propio: su código no sirve para restablecer). */
+    public const SET_PASSWORD = 'set_password';
+
     /** Minutos de validez del código. */
     public const TTL_MINUTES = 10;
 
@@ -78,9 +81,11 @@ class OtpService
                 code: $code,
                 purpose: $purpose,
                 ttlMinutes: self::TTL_MINUTES,
-                subjectLine: $purpose === self::VERIFY_EMAIL
-                    ? 'Confirma tu correo - Simulador SPGTH'
-                    : 'Restablece tu contraseña - Simulador SPGTH',
+                subjectLine: match ($purpose) {
+                    self::VERIFY_EMAIL => 'Confirma tu correo - Simulador SPGTH',
+                    self::SET_PASSWORD => 'Establece o cambia tu contraseña - Simulador SPGTH',
+                    default => 'Restablece tu contraseña - Simulador SPGTH',
+                },
             ));
         } catch (\Throwable $e) {
             Log::error('No se pudo enviar el código OTP por correo', [

@@ -6,6 +6,7 @@ use App\Enums\Role;
 use App\Http\Controllers\Controller;
 use App\Models\Ficha;
 use App\Models\User;
+use App\Services\ContrasenaDeCuenta;
 use App\Services\OtpService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -39,6 +40,7 @@ class AuthController extends Controller
             'name' => $data['name'],
             'email' => $data['email'],
             'password' => $data['password'],
+            'password_estado' => ContrasenaDeCuenta::DEFINIDA,
             'role' => Role::Aspirante,
             'active' => true,
             'ficha_id' => $ficha->id,
@@ -164,7 +166,10 @@ class AuthController extends Controller
         }
 
         // El cast 'password' => 'hashed' hace el hash solo; no usar Hash::make.
-        $user->forceFill(['password' => $data['password']])->save();
+        $user->forceFill(['password' => $data['password'], 'password_estado' => ContrasenaDeCuenta::DEFINIDA])->save();
+
+        // Un código de «establecer desde la sesión» que siguiera pendiente podría permitir un cambio posterior no autorizado.
+        app(OtpService::class)->clear($user->email, OtpService::SET_PASSWORD);
 
         // Cerrar cualquier sesión o token abierto: si alguien entró con la contraseña
         // vieja, recuperar la cuenta no sirve si conserva el acceso.
@@ -237,6 +242,7 @@ class AuthController extends Controller
                 'role' => $user->role->value,
                 'subrole' => $user->subrole,
                 'email_verified' => (bool) $user->email_verified_at,
+                'acceso' => app(ContrasenaDeCuenta::class)->acceso($user),
                 'permissions' => $user->permissions(),
                 // Ficha del usuario (aprendices/aspirantes) y alcance del que
                 // gestiona (instructores: las suyas; super admin: todas).

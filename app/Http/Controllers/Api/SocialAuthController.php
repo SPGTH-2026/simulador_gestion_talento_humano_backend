@@ -8,6 +8,7 @@ use App\Models\Ficha;
 use App\Http\Controllers\Controller;
 use App\Models\SocialAccount;
 use App\Models\User;
+use App\Services\ContrasenaDeCuenta;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -198,6 +199,7 @@ class SocialAuthController extends Controller
                 'name' => $datos['name'],
                 'email' => $datos['email'],
                 'password' => Str::random(40), // no se usa; la cuenta entra por el proveedor
+                'password_estado' => ContrasenaDeCuenta::SIN_DEFINIR, // generada por el sistema, no elegida por la persona
                 'role' => Role::Aspirante,     // el rol NUNCA viene del proveedor
                 'ficha_id' => $ficha->id,
                 'active' => true,
@@ -226,7 +228,7 @@ class SocialAuthController extends Controller
      */
     private function retirarCredencialesPrevias(User $user, string $nombreDeGoogle): void
     {
-        $user->forceFill(['password' => Str::random(40), 'remember_token' => null]);
+        $user->forceFill(['password' => Str::random(40), 'password_estado' => ContrasenaDeCuenta::SIN_DEFINIR, 'remember_token' => null]);
         if ($user->role === Role::Aspirante) {
             $user->forceFill(['name' => $nombreDeGoogle, 'ficha_id' => null]);
         }
