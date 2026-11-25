@@ -30,10 +30,17 @@ trait DocumentosDeConvocatoria
         foreach (array_values($documentos) as $indice => $documento) {
             $referencia = $documento;
             $ponderacion = null;
+            $items = null;
 
             if (is_array($documento)) {
                 // El 'obligatorio' del formato extendido se acepta pero se ignora.
                 $referencia = $documento['codigo'] ?? $documento['id'] ?? null;
+
+                // Ítems del checklist del documento: texto con un ítem por línea (máximo 2000 caracteres).
+                $texto = is_string($documento['items'] ?? null) ? trim($documento['items']) : '';
+                if ($texto !== '') {
+                    $items = mb_substr($texto, 0, 2000);
+                }
 
                 $valor = $documento['ponderacion'] ?? null;
                 if ($valor !== null && $valor !== '') {
@@ -70,7 +77,7 @@ trait DocumentosDeConvocatoria
 
             $id = (int) $parametro->id;
             if (! array_key_exists($id, $normalizados)) {
-                $normalizados[$id] = ['id' => $id, 'ponderacion' => $ponderacion];
+                $normalizados[$id] = ['id' => $id, 'ponderacion' => $ponderacion, 'items' => $items];
             }
         }
 
@@ -101,7 +108,7 @@ trait DocumentosDeConvocatoria
 
         // 1) Los siempre obligatorios, en el orden de config y con true.
         foreach (array_keys($obligatorios) as $id) {
-            $final[$id] = ['id' => $id, 'obligatorio' => true, 'ponderacion' => null];
+            $final[$id] = ['id' => $id, 'obligatorio' => true, 'ponderacion' => null, 'items' => null];
         }
 
         // 2) Los elegidos por el gestor (sin repetir los obligatorios). TODO
@@ -113,6 +120,7 @@ trait DocumentosDeConvocatoria
 
             if (array_key_exists($id, $final)) {
                 $final[$id]['ponderacion'] = $ponderacion;
+                $final[$id]['items'] = $documento['items'] ?? null;
 
                 continue;
             }
@@ -121,6 +129,7 @@ trait DocumentosDeConvocatoria
                 'id' => $id,
                 'obligatorio' => true,
                 'ponderacion' => $ponderacion,
+                'items' => $documento['items'] ?? null,
             ];
         }
 
@@ -161,6 +170,7 @@ trait DocumentosDeConvocatoria
             $sincronizar[(int) $documento['id']] = [
                 'obligatorio' => (bool) ($documento['obligatorio'] ?? false),
                 'ponderacion' => $documento['ponderacion'] ?? null,
+                'items' => $documento['items'] ?? null,
             ];
         }
 

@@ -53,8 +53,9 @@ trait PresentaDocumentos
                         'nombre' => $parametro->nombre,
                     ],
                     'obligatorio' => (bool) $parametro->pivot->obligatorio,
-                    // Peso (%) configurado por el gestor para este documento en
-                    // esta convocatoria. null = sin configurar (reparto igual).
+                    // Ítems del checklist de este documento: una lista, un ítem por línea.
+                    'items' => $this->itemsDeDocumento($parametro->pivot->items),
+                    // Peso (%) configurado por el gestor para este documento en esta convocatoria. null = sin configurar (reparto igual).
                     'ponderacion' => $parametro->pivot->ponderacion === null
                         ? null
                         : round((float) $parametro->pivot->ponderacion, 2),
@@ -191,5 +192,16 @@ trait PresentaDocumentos
             'nota' => 'nota',
             'archivo' => 'archivo',
         ];
+    }
+
+    /** Ítems del checklist de un documento: un ítem por línea, sin líneas vacías. */
+    private function itemsDeDocumento(?string $texto): array
+    {
+        if ($texto === null) {
+            return [];
+        }
+
+        return array_values(array_filter(array_map('trim', explode("
+", $texto)), fn ($linea) => $linea !== ''));
     }
 }

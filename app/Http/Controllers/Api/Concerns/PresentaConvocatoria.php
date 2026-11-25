@@ -112,8 +112,9 @@ trait PresentaConvocatoria
             // Obligatoriedad real guardada: todo documento incluido en la
             // convocatoria queda obligatorio y pesa en la evaluación.
             'obligatorio' => (bool) $d->pivot->obligatorio,
-            // Peso (%) de este documento en la evaluación de esta convocatoria.
-            // null = sin configurar (reparto equitativo en la evaluación).
+            // Ítems del checklist de este documento en esta convocatoria (texto con un ítem por línea).
+            'items' => $d->pivot->items,
+            // Peso (%) de este documento en la evaluación de esta convocatoria. null = sin configurar (reparto equitativo).
             'ponderacion' => $d->pivot->ponderacion === null
                 ? null
                 : round((float) $d->pivot->ponderacion, 2),
