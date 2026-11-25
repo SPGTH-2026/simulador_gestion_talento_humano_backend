@@ -23,3 +23,11 @@ Schedule::command('notificaciones:resumen-diario')
     ->dailyAt('07:00')
     ->timezone('America/Bogota')
     ->withoutOverlapping();
+
+// Depuración de notificaciones (DESACTIVADA por defecto; solo corre con NOTIFICACIONES_DEPURACION_ACTIVA=true): elimina las ocultas y las leídas que superaron su plazo (30 días por defecto; ver
+// config/notificaciones.php). Las no leídas no se tocan. De madrugada, antes del resumen y del cierre.
+Schedule::command('notificaciones:depurar')
+    ->when(fn () => (bool) config('notificaciones.depuracion_activa')) // desactivada por defecto
+    ->dailyAt('03:00')
+    ->timezone('America/Bogota')
+    ->withoutOverlapping();

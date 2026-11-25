@@ -145,6 +145,10 @@ Route::middleware(['auth:sanctum', 'verified', 'ficha'])->group(function () {
         Route::post('notificaciones/leer-todas', [NotificacionController::class, 'leerTodas']);
         Route::post('notificaciones/{notificacion}/leer', [NotificacionController::class, 'leer'])
             ->whereNumber('notificacion');
+        Route::post('notificaciones/{notificacion}/ocultar', [NotificacionController::class, 'ocultar'])
+            ->whereNumber('notificacion');
+        Route::post('notificaciones/{notificacion}/restaurar', [NotificacionController::class, 'restaurar'])
+            ->whereNumber('notificacion');
     });
 
     // ── Documentos y skills de la postulación (Paso 4) ────────────────────
