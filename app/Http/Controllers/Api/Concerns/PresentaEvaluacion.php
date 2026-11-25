@@ -68,6 +68,13 @@ trait PresentaEvaluacion
                 'id' => $p->convocatoria?->id,
                 'titulo' => $p->convocatoria?->nombre,
                 'estado' => $p->convocatoria?->estado?->codigo,
+                // Requisitos que pidió la convocatoria: cada línea es un ítem del checklist del evaluador.
+                'requisitos' => [
+                    'formacion' => $p->convocatoria?->formacion,
+                    'experiencia' => $p->convocatoria?->experiencia,
+                    'competencias' => $p->convocatoria?->competencias,
+                    'conocimientos_especificos' => $p->convocatoria?->conocimientos_especificos,
+                ],
             ],
             'documentos' => [
                 'total' => $docsRequeridos,
