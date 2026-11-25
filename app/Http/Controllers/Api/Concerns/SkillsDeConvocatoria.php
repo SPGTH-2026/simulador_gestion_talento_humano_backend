@@ -48,9 +48,21 @@ trait SkillsDeConvocatoria
                 continue;
             }
 
+            $ponderacion = null;
+
             if (is_array($item)) {
                 $parametroId = $item['parametro_id'] ?? null;
                 $nombre = $item['nombre'] ?? null;
+
+                // Porcentaje de la habilidad (0-100). Vacío = sin porcentaje.
+                $valorPonderacion = $item['ponderacion'] ?? null;
+                if ($valorPonderacion !== null && $valorPonderacion !== '') {
+                    if (! is_numeric($valorPonderacion) || (float) $valorPonderacion < 0 || (float) $valorPonderacion > 100) {
+                        $errores["skills.{$indice}"][] = 'El porcentaje de cada skill debe estar entre 0 y 100.';
+                        continue;
+                    }
+                    $ponderacion = round((float) $valorPonderacion, 2);
+                }
             } elseif (is_string($item)) {
                 $nombre = $item;
             } else {
@@ -99,7 +111,7 @@ trait SkillsDeConvocatoria
             }
 
             $vistas[$clave] = true;
-            $normalizadas[] = ['nombre' => $nombre, 'parametro_id' => $parametroId];
+            $normalizadas[] = ['nombre' => $nombre, 'parametro_id' => $parametroId, 'ponderacion' => $ponderacion];
         }
 
         return $normalizadas;
@@ -139,6 +151,7 @@ trait SkillsDeConvocatoria
             $convocatoria->skills()->create([
                 'nombre' => $skill['nombre'],
                 'parametro_id' => $skill['parametro_id'] ?? null,
+                'ponderacion' => $skill['ponderacion'] ?? null,
             ]);
         }
     }

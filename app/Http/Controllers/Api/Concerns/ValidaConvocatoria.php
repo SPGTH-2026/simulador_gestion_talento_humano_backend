@@ -76,12 +76,6 @@ trait ValidaConvocatoria
                 : null;
         }
 
-        // Porcentajes: se validan sobre la lista FINAL (con los obligatorios que
-        // agrega el backend) para que la suma sea siempre 100 %.
-        if ($documentos !== null) {
-            $this->validarPonderaciones($this->conDocumentosObligatorios($documentos), $errores);
-        }
-
         // Skills: se normalizan ANTES de lanzar los errores, para que un
         // nombre repetido, demasiado largo o un parametro_id inválido
         // devuelvan su 422 y no se guarden de más.
@@ -92,6 +86,18 @@ trait ValidaConvocatoria
                 ? $this->normalizarSkills($datos['skills'] ?? [], $errores)
                 : null;
         }
+
+        // Porcentajes de documentos y habilidades: juntos suman 100 %. Se validan sobre la lista FINAL (con los obligatorios
+        // que agrega el backend) y con lo que ya estaba guardado cuando la petición no lo envía.
+        $documentosFinal = $documentos !== null
+            ? $this->conDocumentosObligatorios($documentos)
+            : ($actual !== null
+                ? $actual->documentos->map(fn ($d) => ['ponderacion' => $d->pivot->ponderacion])->all()
+                : $this->conDocumentosObligatorios(null));
+        $skillsFinal = $skills ?? ($actual !== null
+            ? $actual->skills->map(fn ($s) => ['ponderacion' => $s->ponderacion])->all()
+            : []);
+        $this->validarPorcentajes($documentosFinal, $skillsFinal, $errores);
 
         if ($errores !== []) {
             throw ValidationException::withMessages($errores);
@@ -115,6 +121,45 @@ trait ValidaConvocatoria
             'skills' => $skills,
             'documentos' => $documentos,
         ];
+    }
+
+    /**
+     * Porcentajes de la convocatoria. Sin ningún porcentaje: queda sin configurar (la evaluación reparte en partes iguales).
+     * Con porcentajes: TODOS los documentos y TODAS las habilidades deben tener el suyo y la suma total debe ser 100 %.
+     *
+     * @param  array<int, array{ponderacion: float|null}>  $documentos
+     * @param  array<int, array{ponderacion: float|null}>  $skills
+     */
+    private function validarPorcentajes(array $documentos, array $skills, array &$errores): void
+    {
+        $todos = [...$documentos, ...$skills];
+        $hayPorcentajes = array_filter($todos, fn ($x) => ($x['ponderacion'] ?? null) !== null) !== [];
+
+        if (! $hayPorcentajes) {
+            return;
+        }
+
+        $documentosSinPorcentaje = array_filter($documentos, fn ($d) => ($d['ponderacion'] ?? null) === null);
+        $skillsSinPorcentaje = array_filter($skills, fn ($s) => ($s['ponderacion'] ?? null) === null);
+
+        if ($documentosSinPorcentaje !== []) {
+            $errores['documentos'][] = 'Define el porcentaje de todos los documentos: documentos y habilidades deben sumar 100%.';
+        }
+
+        if ($skillsSinPorcentaje !== []) {
+            $errores['skills'][] = 'Define el porcentaje de cada habilidad de la convocatoria.';
+        }
+
+        if ($documentosSinPorcentaje !== [] || $skillsSinPorcentaje !== []) {
+            return;
+        }
+
+        $suma = array_sum(array_map(fn ($x) => (float) $x['ponderacion'], $todos));
+
+        if (abs($suma - 100) > 0.01) {
+            $errores['documentos'][] = 'Los porcentajes de documentos y habilidades deben sumar 100% (suman '
+                .rtrim(rtrim(number_format($suma, 2, '.', ''), '0'), '.').'%).';
+        }
     }
 
     /** Un valor de texto esta "no vacio" si al recortar espacios queda algo. */

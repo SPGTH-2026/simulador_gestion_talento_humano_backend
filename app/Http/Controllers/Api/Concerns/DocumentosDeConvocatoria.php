@@ -77,42 +77,6 @@ trait DocumentosDeConvocatoria
         return array_values($normalizados);
     }
 
-    /**
-     * Valida la configuración de porcentajes de los documentos.
-     *
-     * Reglas:
-     *  - Sin ninguna ponderación enviada: válido. La convocatoria queda sin
-     *    configurar y la evaluación reparte el 100 % en partes iguales.
-     *  - Con ponderaciones: TODOS los documentos deben tener la suya y la suma
-     *    debe ser 100 % (±0,01 por redondeos de dos decimales).
-     */
-    private function validarPonderaciones(array $documentos, array &$errores): void
-    {
-        $configurados = array_filter(
-            $documentos,
-            fn ($documento) => ($documento['ponderacion'] ?? null) !== null,
-        );
-
-        if ($configurados === []) {
-            return;
-        }
-
-        if (count($configurados) !== count($documentos)) {
-            $errores['documentos'][] = 'Define el porcentaje de todos los documentos: deben sumar 100%.';
-
-            return;
-        }
-
-        $suma = array_sum(array_map(
-            fn ($documento) => (float) $documento['ponderacion'],
-            $documentos,
-        ));
-
-        if (abs($suma - 100) > 0.01) {
-            $errores['documentos'][] = 'Los porcentajes de los documentos deben sumar 100% (suman '
-                .number_format($suma, 2, ',', '.').'%).';
-        }
-    }
 
     /**
      * Combina los documentos elegidos por el gestor con los siempre
@@ -124,7 +88,7 @@ trait DocumentosDeConvocatoria
      *
      * La ponderación enviada por el gestor se conserva; los obligatorios que el
      * backend agrega por su cuenta quedan sin ponderación (null) y se validan
-     * después en validarPonderaciones.
+     * después en validarPorcentajes (ValidaConvocatoria).
      *
      * @param  array<int, array{id:int, ponderacion:float|null}>|null  $documentos
      * @return array<int, array{id:int, obligatorio:bool, ponderacion:float|null}>
