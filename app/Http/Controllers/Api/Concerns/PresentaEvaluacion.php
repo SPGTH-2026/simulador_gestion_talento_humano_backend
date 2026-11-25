@@ -80,7 +80,7 @@ trait PresentaEvaluacion
                 'total' => $docsRequeridos,
                 'cargados' => $docsCargados,
             ],
-            'skills' => $p->convocatoria?->skills?->map(function ($cs) use ($p) {
+            'skills' => $p->convocatoria?->skills?->map(function ($cs) use ($p, $e) {
                 $declarada = $p->skills->firstWhere('convocatoria_skill_id', $cs->id);
 
                 return [
@@ -88,6 +88,9 @@ trait PresentaEvaluacion
                     'nombre' => $cs->nombre,
                     'declarada' => $declarada !== null,
                     'certificada' => $declarada?->tieneCertificado() ?? false,
+                    // Porcentaje de la habilidad (null = sin porcentaje) y lo que marcó el evaluador («skill-{id}»).
+                    'ponderacion' => $cs->ponderacion !== null ? (float) $cs->ponderacion : null,
+                    'marca' => $e?->perfil['skill-'.$cs->id] ?? null,
                 ];
             })->values() ?? [],
             'evaluacion' => $e ? [

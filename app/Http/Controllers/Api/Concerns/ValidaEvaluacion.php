@@ -173,25 +173,51 @@ trait ValidaEvaluacion
      */
     private function calcularCumplimiento(Postulacion $postulacion, ?array $perfil): ?int
     {
-        $pesos = $this->pesosDocumentos($postulacion);
+        // Documentos y habilidades ponderadas comparten la misma escala: su suma es el 100 % de la convocatoria.
+        $elementos = [];
+        foreach ($this->pesosDocumentos($postulacion) as $parametroId => $peso) {
+            $elementos["doc-{$parametroId}"] = $peso;
+        }
+        foreach ($this->pesosHabilidades($postulacion) as $skillId => $peso) {
+            $elementos["skill-{$skillId}"] = $peso;
+        }
 
-        if ($pesos === []) {
+        if ($elementos === []) {
             return null;
         }
 
-        $total = array_sum($pesos);
+        $total = array_sum($elementos);
 
         if ($total <= 0) {
             return null;
         }
 
         $obtenido = 0.0;
-        foreach ($pesos as $parametroId => $peso) {
-            if (! empty($perfil["doc-{$parametroId}"])) {
+        foreach ($elementos as $clave => $peso) {
+            if (! empty($perfil[$clave])) {
                 $obtenido += $peso;
             }
         }
 
         return (int) round(min(100.0, ($obtenido / $total) * 100));
+    }
+
+    /**
+     * Porcentaje de cada habilidad de la convocatoria (id de la skill => %). Las habilidades sin porcentaje no cuentan
+     * en el cumplimiento: solo se muestran.
+     *
+     * @return array<int, float>
+     */
+    private function pesosHabilidades(Postulacion $postulacion): array
+    {
+        $pesos = [];
+
+        foreach ($postulacion->convocatoria?->skills ?? collect() as $skill) {
+            if ($skill->ponderacion !== null) {
+                $pesos[(int) $skill->id] = (float) $skill->ponderacion;
+            }
+        }
+
+        return $pesos;
     }
 }
