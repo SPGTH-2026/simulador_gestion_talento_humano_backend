@@ -7,22 +7,25 @@ y la sesión autenticada en la **cookie de sesión de Laravel** (no en un token 
 ## Qué valida el callback
 
 `GET /api/auth/google/callback` (`SocialAuthController::callback`) solo canjea el código con Google si el intento **continúa un
-inicio hecho desde este mismo navegador**. Antes del canje comprueba, y **consume** (se retira de la sesión aunque falle):
+inicio hecho desde este mismo navegador**. Antes del canje comprueba el inicio guardado en la sesión:
 
-| Condición | Si no se cumple |
-|---|---|
-| El `state` está en la sesión (lo dejó `/api/auth/google/redirect`) | Rechazo |
-| El `state` viene en la URL del callback | Rechazo |
-| Ambos son idénticos (`hash_equals`) | Rechazo |
-| No se había usado antes (de un solo uso) | Rechazo |
-| El inicio tiene menos de 10 minutos | Rechazo |
+| Condición | Si no se cumple | Motivo que queda en el registro |
+|---|---|---|
+| El `state` está en la sesión (lo dejó `/api/auth/google/redirect`) y en la URL del callback | Rechazo | `ausente` |
+| Ambos son idénticos (`hash_equals`) | Rechazo, **sin tocar el inicio vigente** | `distinto` |
+| El inicio tiene hora registrada | Rechazo | `sin_hora` |
+| El inicio tiene menos de 10 minutos | Rechazo | `caducado` |
+
+Un `state` que **coincide** se consume al comprobarlo, acierte o caduque, así que solo sirve una vez. Un `state` que **no
+coincide** no invalida el inicio vigente: un callback viejo (otra pestaña, un reintento) no puede romper el intento que sigue en
+curso. Un `state` ya usado llega a la sesión sin valor y da `ausente`.
 
 Un rechazo redirige a `/login?error=oauth_estado`, **no canjea el código, no crea cuentas, no vincula Google y no toca la sesión
-autenticada**. El `state`, el código y los tokens no se escriben en mensajes ni en registros. No existe un modo alternativo sin
-`state`.
+autenticada**. El registro guarda el motivo, nunca el `state`, el código ni los tokens. No existe un modo alternativo sin `state`.
 
 Con una **sesión ya abierta** (doble clic, «atrás», recargar o un enlace ajeno) el callback tampoco canjea el código ni vincula
-nada: consume el `state` y vuelve al front, de modo que un callback recibido no puede cambiar la cuenta de la sesión.
+nada: si el `state` coincide, lo consume y vuelve al front; si no coincide, solo vuelve al front. Así un callback recibido no puede
+cambiar la cuenta de la sesión.
 
 ## El recorrido que exige la arquitectura actual
 

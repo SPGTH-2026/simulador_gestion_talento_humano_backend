@@ -62,9 +62,12 @@ class SocialAuthController extends Controller
         }
 
         // Antes de canjear el código con Google: el intento tiene que continuar un inicio hecho desde ESTE navegador.
-        if (! $this->estadoDelInicioValido($request)) {
-            Log::warning('Acceso con Google rechazado: el inicio no es válido (state ausente, distinto, ya usado o caducado).', [
+        $motivo = $this->estadoDelInicioValido($request);
+        if ($motivo !== 'ok') {
+            // El motivo describe qué comprobación falló; nunca se registran los valores del state ni del código.
+            Log::warning('Acceso con Google rechazado: el inicio no es válido.', [
                 'provider' => $provider,
+                'motivo' => $motivo,
             ]);
 
             return redirect("$front/login?error=oauth_estado");
@@ -241,22 +244,35 @@ class SocialAuthController extends Controller
     }
 
     /**
-     * Comprueba, y CONSUME, el inicio de acceso con Google de esta sesión: el state debe estar en la sesión y en la URL, ser
-     * idéntico, no haberse usado antes (se retira de la sesión en esta misma llamada, acierte o falle) y el inicio tener menos
-     * de VIGENCIA_INICIO_SEGUNDOS. No hay modo alternativo sin state.
+     * Comprueba el inicio de acceso con Google de esta sesión y devuelve el motivo: 'ok' o el rechazo ('ausente', 'distinto',
+     * 'sin_hora' o 'caducado'). El state debe estar en la sesión y en la URL, y ser idéntico.
+     *
+     * Un state que NO coincide no toca el inicio vigente: un callback viejo (otra pestaña, un reintento) no puede invalidar el
+     * intento que sigue en curso. Un state que coincide se consume aquí mismo, acierte o caduque, así que solo sirve una vez.
+     * No hay modo alternativo sin state.
      */
-    private function estadoDelInicioValido(Request $request): bool
+    private function estadoDelInicioValido(Request $request): string
     {
-        $enSesion = (string) $request->session()->pull(self::CLAVE_STATE, '');
-        $inicio = (int) $request->session()->pull(self::CLAVE_INICIO, 0);
+        $enSesion = (string) $request->session()->get(self::CLAVE_STATE, '');
         $enUrl = (string) $request->query('state', '');
 
-        if ($enSesion === '' || $enUrl === '' || ! hash_equals($enSesion, $enUrl)) {
-            return false;
+        if ($enSesion === '' || $enUrl === '') {
+            return 'ausente';
+        }
+
+        if (! hash_equals($enSesion, $enUrl)) {
+            return 'distinto';
+        }
+
+        $inicio = (int) $request->session()->pull(self::CLAVE_INICIO, 0);
+        $request->session()->forget(self::CLAVE_STATE);
+
+        if ($inicio <= 0) {
+            return 'sin_hora';
         }
 
         $transcurrido = now()->timestamp - $inicio;
 
-        return $inicio > 0 && $transcurrido >= 0 && $transcurrido <= self::VIGENCIA_INICIO_SEGUNDOS;
+        return $transcurrido >= 0 && $transcurrido <= self::VIGENCIA_INICIO_SEGUNDOS ? 'ok' : 'caducado';
     }
 }

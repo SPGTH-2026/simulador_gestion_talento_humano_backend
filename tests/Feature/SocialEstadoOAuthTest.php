@@ -81,14 +81,56 @@ class SocialEstadoOAuthTest extends TestCase
         $this->assertRechazado($this->callbackConEstado($estado));
     }
 
-    public function test_el_state_se_consume_aunque_el_intento_falle(): void
+    public function test_un_state_distinto_no_invalida_el_inicio_vigente(): void
     {
         $estado = $this->iniciarOAuth();
-        $this->googleNoDebeConsultarse();
-        $this->callbackConEstado('otro-state');
+        // Si el rechazo llegara a canjear el código, assertRechazado fallaría: no crea cuenta ni redirige a la ficha.
+        $this->googleResponde('google-1', $this->correo);
+        $this->assertRechazado($this->callbackConEstado('otro-state'));
 
-        // El state verdadero tampoco sirve después de un intento fallido: hay que volver a iniciar.
-        $this->assertRechazado($this->callbackConEstado($estado));
+        // El inicio que sigue en curso (otra pestaña, un callback viejo que llegó antes) todavía se puede completar.
+        $this->callbackConEstado($estado)->assertRedirect(config('app.frontend_url').'/completar-ficha?pendiente=google');
+    }
+
+    public function test_un_callback_de_un_inicio_viejo_no_rompe_el_inicio_nuevo(): void
+    {
+        // Dos inicios desde el mismo navegador: el callback del primero llega después del segundo.
+        $this->iniciarOAuth();
+        $estadoNuevo = $this->iniciarOAuth();
+        $this->googleResponde('google-1', $this->correo);
+
+        $this->assertRechazado($this->callbackConEstado('state-del-primer-inicio'));
+
+        $this->callbackConEstado($estadoNuevo)->assertRedirect(config('app.frontend_url').'/completar-ficha?pendiente=google');
+    }
+
+    public function test_el_motivo_del_rechazo_queda_en_el_registro_sin_valores(): void
+    {
+        $this->iniciarOAuth();
+        $this->googleNoDebeConsultarse();
+        Log::spy();
+
+        $this->callbackConEstado('state-distinto-secreto');
+
+        Log::shouldHaveReceived('warning')->withArgs(function ($mensaje, $contexto = []) {
+            return ($contexto['motivo'] ?? null) === 'distinto'
+                && ! str_contains(json_encode($contexto).$mensaje, 'state-distinto-secreto');
+        })->once();
+    }
+
+    public function test_sin_state_en_la_sesion_el_motivo_es_ausente(): void
+    {
+        // Lo que ocurre cuando el state ya se usó (reenvío del enlace, atrás): la sesión ya no lo tiene.
+        $estado = $this->iniciarOAuth();
+        $this->googleResponde('google-1', $this->correo);
+        $this->callbackConEstado($estado);
+        $this->flushSession();
+        $this->googleNoDebeConsultarse();
+        Log::spy();
+
+        $this->callbackConEstado($estado);
+
+        Log::shouldHaveReceived('warning')->withArgs(fn ($mensaje, $contexto = []) => ($contexto['motivo'] ?? null) === 'ausente')->once();
     }
 
     public function test_un_inicio_de_mas_de_diez_minutos_caduca(): void
