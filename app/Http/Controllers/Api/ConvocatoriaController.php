@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\ConvocatoriaEstado;
+use App\Enums\VentanaPostulacion;
 use App\Enums\PostulacionEstado;
 use App\Http\Controllers\Api\Concerns\IdentificadorConvocatoria;
 use App\Http\Controllers\Controller;
@@ -168,6 +169,9 @@ class ConvocatoriaController extends Controller
             ]);
         }
 
+        // Para saber si esta edición la REABRE (estaba fuera de plazo y vuelve a estar abierta).
+        $ventanaAntes = $convocatoria->ventanaPostulacion();
+
         // Paso 5 (regla H): comprobar postulaciones y guardar van en UNA
         // transacción con candado de fila. El SELECT ... FOR UPDATE serializa con
         // el INSERT del aspirante (la FK de postulaciones bloquea la fila padre),
@@ -217,6 +221,10 @@ class ConvocatoriaController extends Controller
 
             return $actual;
         });
+
+        if ($ventanaAntes === VentanaPostulacion::Cerrada && $convocatoria->ventanaPostulacion() === VentanaPostulacion::Abierta) {
+            app(Avisos::class)->convocatoriaReabierta($convocatoria);
+        }
 
         $convocatoria->load($this->relaciones());
         $this->cargarCamposDePostulacion($convocatoria, $request->user());

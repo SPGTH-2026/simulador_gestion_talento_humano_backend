@@ -35,6 +35,9 @@ enum TipoNotificacion: string
     case ConvocatoriaRecepcionCerrada = 'convocatoria_recepcion_cerrada';
     case ConvocatoriaCerrada = 'convocatoria_cerrada';
 
+    // Se amplió el plazo y la convocatoria volvió a recibir postulaciones: lo ven quienes ya tenían una postulación (enviada o retirada).
+    case ConvocatoriaReabierta = 'convocatoria_reabierta';
+
     // Resumen diario de pendientes (lo calcula ResumenPendientes; no lo dispara un evento).
     case PendientesEvaluar = 'pendientes_evaluar';
     case PendientesSeleccion = 'pendientes_seleccion';
