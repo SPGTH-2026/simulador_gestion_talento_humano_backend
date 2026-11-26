@@ -44,12 +44,16 @@ class SocialEstadoOAuthTest extends TestCase
         $this->assertEqualsWithDelta(now()->timestamp, (int) session('google_oauth_inicio'), 5);
     }
 
-    public function test_sin_state_en_la_sesion_se_rechaza_antes_de_canjear_el_codigo(): void
+    public function test_sin_state_en_la_sesion_se_canjea_en_modo_permisivo_temporal(): void
     {
-        // Es el ataque: un callback con el código del atacante abierto en el navegador de la víctima, sin inicio previo.
-        $this->googleNoDebeConsultarse();
+        // TEMPORAL (26-nov-2026): como en 90a9af4, sin state en la sesión el código se canjea igual. Con
+        // TOLERAR_SIN_STATE_EN_SESION = false esto vuelve a rechazarse con 'ausente'.
+        $this->googleResponde('google-1', $this->correo);
+        Log::spy();
 
-        $this->assertRechazado($this->callbackConEstado('estado-del-atacante'));
+        $this->callbackConEstado('cualquier-state')->assertRedirect(config('app.frontend_url').'/completar-ficha?pendiente=google');
+
+        Log::shouldHaveReceived('warning')->withArgs(fn ($mensaje) => str_contains($mensaje, 'modo permisivo temporal'))->once();
     }
 
     public function test_sin_state_en_la_url_se_rechaza(): void
@@ -74,11 +78,15 @@ class SocialEstadoOAuthTest extends TestCase
         $this->googleResponde('google-1', $this->correo);
 
         $this->callbackConEstado($estado)->assertRedirect(config('app.frontend_url').'/completar-ficha?pendiente=google');
+        $this->assertNull(session('state'), 'El state se consume al usarlo.');
 
-        // Segundo intento con el mismo state (reenvío del enlace, atrás, otra pestaña): ya no sirve.
+        // Segundo intento (reenvío, atrás): ya no hay state; en el modo permisivo temporal llega a Google, que rechaza el
+        // código ya gastado.
         $this->flushSession();
-        $this->googleNoDebeConsultarse();
-        $this->assertRechazado($this->callbackConEstado($estado));
+        $this->googleRechazaElCodigo();
+        $this->callbackConEstado($estado)->assertRedirect(config('app.frontend_url').'/login?error=oauth_codigo');
+        $this->assertGuest();
+        $this->assertDatabaseCount('users', 0);
     }
 
     public function test_un_state_distinto_no_invalida_el_inicio_vigente(): void
@@ -118,17 +126,14 @@ class SocialEstadoOAuthTest extends TestCase
         })->once();
     }
 
-    public function test_sin_state_en_la_sesion_el_motivo_es_ausente(): void
+    public function test_sin_state_en_la_url_el_motivo_es_ausente(): void
     {
-        // Lo que ocurre cuando el state ya se usó (reenvío del enlace, atrás): la sesión ya no lo tiene.
-        $estado = $this->iniciarOAuth();
-        $this->googleResponde('google-1', $this->correo);
-        $this->callbackConEstado($estado);
-        $this->flushSession();
+        // Con state en la sesión y sin state en la URL se sigue rechazando, también en el modo permisivo temporal.
+        $this->iniciarOAuth();
         $this->googleNoDebeConsultarse();
         Log::spy();
 
-        $this->callbackConEstado($estado);
+        $this->callbackConEstado(null);
 
         Log::shouldHaveReceived('warning')->withArgs(fn ($mensaje, $contexto = []) => ($contexto['motivo'] ?? null) === 'ausente')->once();
     }

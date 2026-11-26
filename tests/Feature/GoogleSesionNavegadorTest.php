@@ -71,14 +71,25 @@ class GoogleSesionNavegadorTest extends TestCase
         $this->assertSesionDe($usuario);
     }
 
-    public function test_callback_sin_inicio_se_rechaza_sin_consultar_a_google(): void
+    public function test_callback_sin_inicio_se_canjea_en_modo_permisivo_temporal(): void
+    {
+        // TEMPORAL: sin state en la sesión se canjea igual (90a9af4). Un código ajeno o gastado lo rechaza Google.
+        $this->cargarLaSpa();
+        $this->googleRechazaElCodigo();
+
+        $this->volverDeGoogle('state-ajeno')->assertRedirect($this->front.'/login?error=oauth_codigo');
+        $this->desdeLaSpa('GET', '/api/auth/me')->assertUnauthorized();
+        $this->assertDatabaseCount('social_accounts', 0);
+    }
+
+    public function test_state_presente_y_distinto_se_sigue_rechazando(): void
     {
         $this->cargarLaSpa();
+        $this->iniciarDesdeElFront();
         $this->googleNoDebeConsultarse();
 
         $this->volverDeGoogle('state-ajeno')->assertRedirect($this->front.'/login?error=oauth_estado');
         $this->desdeLaSpa('GET', '/api/auth/me')->assertUnauthorized();
-        $this->assertDatabaseCount('social_accounts', 0);
     }
 
     public function test_tras_un_callback_invalido_un_intento_nuevo_funciona(): void

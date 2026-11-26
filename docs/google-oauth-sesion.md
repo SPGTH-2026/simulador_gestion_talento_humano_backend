@@ -73,6 +73,20 @@ Sin cookie previa (una petición aislada con curl) no fallaba: el id nuevo se in
 del front y, en cualquier otro caso (la vuelta desde Google), corre el grupo `web` completo, CSRF incluido. No cambia la
 validación del `state`, la caducidad, el uso único ni la vinculación segura, y no necesita cambios de configuración.
 
+## Modo permisivo temporal (26-nov-2026)
+
+Para recuperar el acceso mientras se prueba el recorrido estricto con Google real, `SocialAuthController` tiene
+`TOLERAR_SIN_STATE_EN_SESION = true`: **si la sesión no tiene `state`**, el callback canjea el código igual, como hacía 90a9af4,
+y deja en el registro `Acceso con Google sin state en la sesión: se acepta en modo permisivo temporal.` (sin valores).
+
+Sigue igual: un `state` presente que no coincide o caducado se rechaza (`oauth_estado`); el `state` que coincide se consume; con
+sesión abierta no se canjea nada; el correo verificado por Google y la vinculación segura no dependen del `state`. La sesión web
+única (`sesion.web`) sigue siendo necesaria: sin ella se pierde el alta pendiente y falla la elección de ficha.
+
+**Retirarlo:** poner la constante en `false` (vuelve el rechazo `ausente`) y restaurar las pruebas estrictas marcadas como
+TEMPORAL en `SocialEstadoOAuthTest` y `GoogleSesionNavegadorTest`. Conviene hacerlo cuando el registro deje de mostrar el aviso
+del modo permisivo en accesos legítimos.
+
 ## Qué se pudo contrastar en el repositorio y qué queda pendiente
 
 **Confirmado en el repositorio**
@@ -105,6 +119,7 @@ validación del `state`, la caducidad, el uso único ni la vinculación segura, 
 - `tests/Feature/GoogleSesionNavegadorTest.php` con `tests/Support/NavegadorReal.php`: cookies cifradas que viajan entre peticiones,
   driver `database`, `Referer` del front o de Google y estado del servidor reiniciado en cada petición. Cubre cuenta vinculada, alta
   nueva con ficha, callback inválido, reintento, dos pestañas y pestaña antigua.
+- `tests/Feature/AccesoNavegadorTest.php`: cerrar y volver a entrar con Google, contraseña y recuperación con cookies reales.
 - `tests/Feature/SocialEstadoOAuthTest.php`: validación del `state`, sesión abierta y flujos válidos.
 - `tests/Feature/SocialCallbackSessionTest.php` y `SocialVinculacionSeguraTest.php`: acceso y vinculación, ahora con el inicio real.
 - `tests/Support/InicioOAuth.php`: hace el inicio de verdad (controlador y Socialite reales) y **solo simula el canje del código con

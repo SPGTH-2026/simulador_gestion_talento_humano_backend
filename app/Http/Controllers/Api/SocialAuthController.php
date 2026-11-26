@@ -36,6 +36,12 @@ class SocialAuthController extends Controller
     /** Vigencia de un inicio de acceso con Google: pasado este tiempo hay que volver a empezar. */
     private const VIGENCIA_INICIO_SEGUNDOS = 600;
 
+    /**
+     * TEMPORAL (recuperación del acceso, 26-nov-2026): si la sesión no tiene state, el callback canjea el código igual, como
+     * hacía 90a9af4. Ponerlo en false restituye el rechazo estricto ('ausente') sin tocar nada más.
+     */
+    private const TOLERAR_SIN_STATE_EN_SESION = true;
+
     public function redirect(Request $request, string $provider)
     {
         abort_unless(in_array($provider, self::PROVIDERS, true), 404);
@@ -62,7 +68,14 @@ class SocialAuthController extends Controller
         }
 
         // Antes de canjear el código con Google: el intento tiene que continuar un inicio hecho desde ESTE navegador.
+        $sinStateEnSesion = (string) $request->session()->get(self::CLAVE_STATE, '') === '';
         $motivo = $this->estadoDelInicioValido($request);
+        if ($motivo === 'ausente' && $sinStateEnSesion && self::TOLERAR_SIN_STATE_EN_SESION) {
+            // TEMPORAL: comportamiento de la versión que funcionaba (90a9af4). Sin state en la sesión se canjea igual; un state
+            // presente que no coincide, o caducado, se sigue rechazando. Nunca se registran valores.
+            Log::warning('Acceso con Google sin state en la sesión: se acepta en modo permisivo temporal.', ['provider' => $provider]);
+            $motivo = 'ok';
+        }
         if ($motivo !== 'ok') {
             // El motivo describe qué comprobación falló; nunca se registran los valores del state ni del código.
             Log::warning('Acceso con Google rechazado: el inicio no es válido.', [

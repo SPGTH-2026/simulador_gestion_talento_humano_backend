@@ -3,6 +3,7 @@
 namespace Tests\Support;
 
 use Illuminate\Cookie\CookieValuePrefix;
+use Illuminate\Support\Facades\Facade;
 use Illuminate\Testing\TestResponse;
 use Laravel\Socialite\Contracts\Factory as SocialiteFactory;
 use Mockery\MockInterface;
@@ -63,6 +64,10 @@ trait NavegadorReal
     /** Inicio real desde el front; devuelve el state que viajaría a Google en la URL de autorización. */
     protected function iniciarDesdeElFront(): string
     {
+        // El inicio usa siempre Socialite real (si una vuelta anterior simuló a Google, se descarta esa simulación).
+        $this->app->forgetInstance(SocialiteFactory::class);
+        Facade::clearResolvedInstance(SocialiteFactory::class);
+
         $respuesta = $this->navegarDesdeElFront('/api/auth/google/redirect')->assertRedirect();
         parse_str((string) parse_url((string) $respuesta->headers->get('Location'), PHP_URL_QUERY), $consulta);
         $this->assertNotEmpty($consulta['state'] ?? '', 'La URL de Google no lleva state.');
