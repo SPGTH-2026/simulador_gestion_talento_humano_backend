@@ -47,7 +47,7 @@ class ParametroSeederTemasTest extends TestCase
             'estado_convocatoria' => 4,
             'estado_postulacion' => 3,
             'tipo_convocatoria' => 2,
-            'tipo_documento' => 7,
+            'tipo_documento' => 6,
             'tipo_empleo' => 3,
             'tipo_contrato' => 4,
             'modalidad' => 3,
@@ -66,7 +66,7 @@ class ParametroSeederTemasTest extends TestCase
             );
         }
 
-        $this->assertSame(54, Parametro::count());
+        $this->assertSame(53, Parametro::count());
     }
 
     public function test_valores_de_sistema_quedan_con_codigo_activos_y_es_sistema(): void
@@ -100,7 +100,7 @@ class ParametroSeederTemasTest extends TestCase
         $this->ejecutarSeeder();
 
         $this->assertSame(12, ParametroTema::count());
-        $this->assertSame(54, Parametro::count());
+        $this->assertSame(53, Parametro::count());
     }
 
     /**

@@ -38,7 +38,7 @@ final class EscribeDocumentoPostulacion
         UploadedFile $archivo,
         ?CorreccionPostulacion $correccion,
     ): array {
-        if (! $parametro || ! $this->documentoAplica($postulacion, $parametro)) {
+        if (! $parametro || ! $this->convocatoriaPide($postulacion, $parametro->id)) {
             throw ValidationException::withMessages([
                 $campo => 'Ese documento no hace parte de esta convocatoria.',
             ]);
@@ -201,21 +201,6 @@ final class EscribeDocumentoPostulacion
         if ($esRequerido && $postulacion) {
             $this->invalidarEvaluacionesPorCambioDocumental($postulacion);
         }
-    }
-
-    /**
-     * ¿Se puede subir este documento a la postulación? Los de la convocatoria, sí; la autorización del representante
-     * solo si la persona es menor de edad (no pertenece a la convocatoria: la exige el sistema por la edad).
-     */
-    private function documentoAplica(Postulacion $postulacion, Parametro $parametro): bool
-    {
-        if ($parametro->codigo === Parametro::DOC_AUTORIZACION_REPRESENTANTE) {
-            $postulacion->loadMissing('datosPersonales');
-
-            return $postulacion->datosPersonales?->esMenor() ?? false;
-        }
-
-        return $this->convocatoriaPide($postulacion, $parametro->id);
     }
 
     /** ¿La convocatoria de la postulación pide este tipo de documento? */

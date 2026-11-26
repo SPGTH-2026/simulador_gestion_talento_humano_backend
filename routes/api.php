@@ -225,6 +225,9 @@ Route::middleware(['auth:sanctum', 'verified', 'ficha'])->group(function () {
     // Revisores (permiso 'documentos:ver'): solo LECTURA de postulaciones ajenas,
     // con alcance por ficha (fuera de su ficha -> 404, sin revelar existencia).
     Route::middleware('can:documentos:ver')->prefix('revision')->group(function () {
+        Route::get('postulaciones/{postulacion}/datos-personales', [PostulacionDatosPersonalesController::class, 'showRevision'])
+            ->whereNumber('postulacion')
+            ->missing(fn () => abort(404, 'Postulación no encontrada.'));
         Route::get('postulaciones/{postulacion}/documentos', [PostulacionDocumentoController::class, 'showRevision'])
             ->whereNumber('postulacion')
             ->missing(fn () => abort(404, 'Postulación no encontrada.'));

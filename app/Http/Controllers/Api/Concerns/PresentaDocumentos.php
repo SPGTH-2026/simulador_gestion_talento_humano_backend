@@ -66,21 +66,6 @@ trait PresentaDocumentos
             })
             ->values();
 
-        // Un menor de edad ve además la autorización de su representante: es un requisito por edad que pone el sistema, así
-        // que va obligatoria y SIN porcentaje (no es de la convocatoria y no entra en el puntaje de la evaluación).
-        $autorizacion = $postulacion->datosPersonales?->esMenor() ? $documentosService->autorizacionRepresentante() : null;
-        if ($autorizacion) {
-            $subidoAutorizacion = $porParametro->get($autorizacion->id);
-            $documentos->push([
-                'parametro' => ['id' => $autorizacion->id, 'codigo' => $autorizacion->codigo, 'nombre' => $autorizacion->nombre],
-                'obligatorio' => true,
-                'requisito_edad' => true,
-                'ponderacion' => null,
-                'estado' => $subidoAutorizacion ? 'subido' : 'pendiente',
-                'archivo' => $subidoAutorizacion ? $this->archivoResumen($subidoAutorizacion) : null,
-            ]);
-        }
-
         // Completo = todos los documentos OBLIGATORIOS están "subidos" o en
         // "no_aplica" (la libreta de una mujer no se exige). Los opcionales y los
         // adicionales no afectan la completitud. Misma regla que valida el envío.

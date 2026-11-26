@@ -32,6 +32,17 @@ class PostulacionDatosPersonalesController extends Controller
         return response()->json(['data' => $this->datos->presentar($postulacion)]);
     }
 
+    /**
+     * Datos de una postulación AJENA para quien revisa (solo lectura). Mismo alcance que los documentos: fuera de su ficha o
+     * en borrador responde 404. Es lo que necesita quien contrata para verificar los datos y localizar al representante.
+     */
+    public function showRevision(Request $request, Postulacion $postulacion): JsonResponse
+    {
+        $this->exigirRevision($request, $postulacion);
+
+        return response()->json(['data' => $this->datos->presentar($postulacion)]);
+    }
+
     public function update(DatosPersonalesRequest $request, Postulacion $postulacion): JsonResponse
     {
         $this->exigirPropia($request, $postulacion);

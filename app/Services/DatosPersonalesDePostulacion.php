@@ -18,6 +18,12 @@ use Illuminate\Validation\ValidationException;
  */
 class DatosPersonalesDePostulacion
 {
+    /** Relaciones que se cargan para presentar los datos (catálogos y ubicaciones, del aspirante y de su representante). */
+    private const RELACIONES = [
+        'tipoDocumentoIdentidad', 'nivelFormacion', 'departamento', 'municipio',
+        'representanteTipoDocumento', 'representanteDepartamento', 'representanteMunicipio',
+    ];
+
     /**
      * Guarda (crea o reemplaza) los datos de la postulación. Los catálogos llegan por CÓDIGO. Un mayor de edad no conserva
      * datos de representante de un guardado anterior. La fecha de aceptación del tratamiento de datos se conserva.
@@ -45,10 +51,7 @@ class DatosPersonalesDePostulacion
             'direccion' => trim($datos['direccion'] ?? '') ?: null,
         ]);
 
-        $esMenor = $registro->esMenor();
-        foreach (['representante_nombre', 'representante_documento', 'representante_telefono', 'representante_parentesco'] as $campo) {
-            $registro->{$campo} = $esMenor ? trim($datos[$campo] ?? '') : null;
-        }
+        $this->guardarRepresentante($registro, $datos);
 
         // La autorización se registra al marcarla y no se revoca guardando de nuevo: conserva la fecha de la primera vez.
         if (! empty($datos['acepta_tratamiento_datos'])) {
@@ -61,7 +64,42 @@ class DatosPersonalesDePostulacion
             PerfilAspirante::updateOrCreate(['user_id' => $postulacion->user_id], ['sexo_id' => $sexoId]);
         });
 
-        return $registro->load(['tipoDocumentoIdentidad', 'nivelFormacion', 'departamento', 'municipio']);
+        return $registro->load(self::RELACIONES);
+    }
+
+    /**
+     * Datos del representante legal: solo los lleva un menor de edad (16 y 17 años); un mayor no conserva los de un
+     * guardado anterior. La autorización se firma en persona al contratar: aquí solo hay datos para localizarlo.
+     *
+     * @param  array<string, mixed>  $datos
+     */
+    private function guardarRepresentante(PostulacionDatosPersonales $registro, array $datos): void
+    {
+        $texto = fn (string $campo) => trim($datos[$campo] ?? '') ?: null;
+
+        if (! $registro->esMenor()) {
+            $registro->forceFill([
+                'representante_nombre' => null, 'representante_documento' => null, 'representante_tipo_documento_id' => null,
+                'representante_telefono' => null, 'representante_correo' => null, 'representante_telefono_alterno' => null,
+                'representante_departamento_codigo' => null, 'representante_municipio_codigo' => null,
+                'representante_parentesco' => null, 'representante_conoce' => false,
+            ]);
+
+            return;
+        }
+
+        $registro->forceFill([
+            'representante_nombre' => $texto('representante_nombre'),
+            'representante_documento' => strtoupper((string) $texto('representante_documento')),
+            'representante_tipo_documento_id' => $this->resolver('tipo_documento_identidad', $datos['representante_tipo_documento'], 'representante_tipo_documento', 'El tipo de documento del representante no es válido.'),
+            'representante_telefono' => $texto('representante_telefono'),
+            'representante_correo' => strtolower((string) $texto('representante_correo')),
+            'representante_telefono_alterno' => $texto('representante_telefono_alterno'),
+            'representante_departamento_codigo' => $texto('representante_departamento'),
+            'representante_municipio_codigo' => $texto('representante_municipio'),
+            'representante_parentesco' => $texto('representante_parentesco'),
+            'representante_conoce' => ! empty($datos['representante_conoce']),
+        ]);
     }
 
     /**
@@ -71,7 +109,7 @@ class DatosPersonalesDePostulacion
      */
     public function presentar(Postulacion $postulacion): array
     {
-        $postulacion->loadMissing(['datosPersonales.tipoDocumentoIdentidad', 'datosPersonales.nivelFormacion', 'datosPersonales.departamento', 'datosPersonales.municipio']);
+        $postulacion->loadMissing(array_map(fn (string $relacion) => "datosPersonales.{$relacion}", self::RELACIONES));
         $datos = $postulacion->datosPersonales;
 
         return [
@@ -91,9 +129,15 @@ class DatosPersonalesDePostulacion
                 'direccion' => $datos->direccion,
                 'nivel_formacion' => $this->parametro($datos->nivelFormacion),
                 'representante_nombre' => $datos->representante_nombre,
+                'representante_tipo_documento' => $this->parametro($datos->representanteTipoDocumento),
                 'representante_documento' => $datos->representante_documento,
                 'representante_telefono' => $datos->representante_telefono,
+                'representante_correo' => $datos->representante_correo,
+                'representante_telefono_alterno' => $datos->representante_telefono_alterno,
+                'representante_departamento' => $datos->representanteDepartamento ? ['codigo' => $datos->representanteDepartamento->codigo, 'nombre' => $datos->representanteDepartamento->nombre] : null,
+                'representante_municipio' => $datos->representanteMunicipio ? ['codigo' => $datos->representanteMunicipio->codigo, 'nombre' => $datos->representanteMunicipio->nombre] : null,
                 'representante_parentesco' => $datos->representante_parentesco,
+                'representante_conoce' => $datos->representante_conoce,
                 'acepta_tratamiento_datos' => $datos->acepta_tratamiento_datos_at !== null,
             ] : null,
         ];

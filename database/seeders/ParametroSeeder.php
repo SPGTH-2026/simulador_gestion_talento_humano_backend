@@ -125,7 +125,6 @@ class ParametroSeeder extends Seeder
                 ['codigo' => 'certificados_laborales', 'nombre' => 'Certificados laborales', 'orden' => 4, 'es_sistema' => true],
                 ['codigo' => 'libreta_militar', 'nombre' => 'Libreta militar', 'orden' => 5],
                 ['codigo' => 'tarjeta_profesional', 'nombre' => 'Tarjeta profesional', 'orden' => 6],
-                ['codigo' => 'autorizacion_representante', 'nombre' => 'Autorización del representante legal', 'orden' => 7],
             ]],
 
         ];

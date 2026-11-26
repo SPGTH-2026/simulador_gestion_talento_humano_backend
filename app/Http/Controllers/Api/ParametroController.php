@@ -136,7 +136,7 @@ class ParametroController extends Controller
             ->where('tema_id', $tema->id)
             ->where('activo', true)
             // Solo los documentos pueden crearlos los gestores: ahí cada ficha ve los suyos y los globales.
-            ->when($tema->codigo === 'tipo_documento', fn ($q) => $q->visiblesPara($usuario)->asignablesAConvocatoria())
+            ->when($tema->codigo === 'tipo_documento', fn ($q) => $q->visiblesPara($usuario))
             ->orderBy('orden')
             ->orderBy('nombre')
             ->get(['id', 'codigo', 'nombre', 'es_sistema', 'es_defecto'])

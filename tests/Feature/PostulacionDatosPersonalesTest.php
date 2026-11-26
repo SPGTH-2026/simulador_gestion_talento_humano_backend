@@ -46,9 +46,12 @@ class PostulacionDatosPersonalesTest extends TestCase
     {
         return [
             'representante_nombre' => 'Marta Pérez',
+            'representante_tipo_documento' => 'cc',
             'representante_documento' => '52123456',
             'representante_telefono' => '3109876543',
+            'representante_correo' => 'marta.perez@example.com',
             'representante_parentesco' => 'Madre',
+            'representante_conoce' => true,
         ];
     }
 
@@ -125,7 +128,10 @@ class PostulacionDatosPersonalesTest extends TestCase
 
         $this->guardar($aspirante, $postulacion, $this->cuerpo(['fecha_nacimiento' => $fecha]))
             ->assertStatus(422)
-            ->assertJsonValidationErrors(['representante_nombre', 'representante_documento', 'representante_telefono', 'representante_parentesco']);
+            ->assertJsonValidationErrors([
+                'representante_nombre', 'representante_tipo_documento', 'representante_documento', 'representante_telefono',
+                'representante_correo', 'representante_parentesco', 'representante_conoce',
+            ]);
 
         $this->guardar($aspirante, $postulacion, $this->cuerpo(['fecha_nacimiento' => $fecha] + $this->representante()))
             ->assertOk()
@@ -149,7 +155,11 @@ class PostulacionDatosPersonalesTest extends TestCase
 
         $this->guardar($aspirante, $postulacion, $this->cuerpo($this->representante()))->assertOk();
 
-        $this->assertNull(PostulacionDatosPersonales::firstOrFail()->representante_nombre);
+        $registro = PostulacionDatosPersonales::firstOrFail();
+        $this->assertNull($registro->representante_nombre);
+        $this->assertNull($registro->representante_correo);
+        $this->assertNull($registro->representante_tipo_documento_id);
+        $this->assertFalse($registro->representante_conoce);
     }
 
     public function test_los_datos_se_guardan_sin_autorizar_pero_no_cuentan_como_completos_ni_dejan_enviar(): void
@@ -263,87 +273,110 @@ class PostulacionDatosPersonalesTest extends TestCase
             ->assertJsonValidationErrors('codigo');
     }
 
-    // ── Autorización del representante (requisito por edad, sin porcentaje) ──
+    // ── Representante legal de un menor: datos para localizarlo (la autorización se firma en persona) ──
 
-    private function guardarComoMenor(array $documentos = ['hoja_de_vida' => false]): array
+    private function guardarComoMenor(array $documentos = ['hoja_de_vida' => false], array $cambios = []): array
     {
         [$aspirante, $postulacion] = $this->borrador($documentos);
         $this->guardar($aspirante, $postulacion, $this->cuerpo([
             'fecha_nacimiento' => now('America/Bogota')->subYears(17)->toDateString(),
-        ] + $this->representante()))->assertOk();
+        ] + $cambios + $this->representante()))->assertOk();
 
         return [$aspirante, $postulacion];
     }
 
-    private function subirAutorizacion($aspirante, Postulacion $postulacion)
-    {
-        return $this->actingAs($aspirante)->post(
-            "/api/postulaciones/{$postulacion->id}/documentos",
-            ['codigo' => 'autorizacion_representante', 'archivo' => $this->pdf()],
-            ['Accept' => 'application/json'],
-        );
-    }
-
-    private function autorizacionEnEstado($aspirante, Postulacion $postulacion): ?array
-    {
-        $estado = $this->actingAs($aspirante)->getJson("/api/postulaciones/{$postulacion->id}/documentos")->assertOk();
-
-        return collect($estado->json('data.documentos'))->firstWhere('parametro.codigo', 'autorizacion_representante');
-    }
-
-    public function test_el_menor_ve_la_autorizacion_obligatoria_y_sin_porcentaje(): void
-    {
-        [$aspirante, $postulacion] = $this->guardarComoMenor();
-
-        $autorizacion = $this->autorizacionEnEstado($aspirante, $postulacion);
-
-        $this->assertNotNull($autorizacion);
-        $this->assertTrue($autorizacion['obligatorio']);
-        $this->assertNull($autorizacion['ponderacion']);
-        $this->assertSame('pendiente', $autorizacion['estado']);
-    }
-
-    public function test_el_mayor_de_edad_no_ve_la_autorizacion_ni_puede_subirla(): void
-    {
-        [$aspirante, $postulacion] = $this->borrador();
-        $this->guardar($aspirante, $postulacion, $this->cuerpo())->assertOk();
-
-        $this->assertNull($this->autorizacionEnEstado($aspirante, $postulacion));
-        $this->subirAutorizacion($aspirante, $postulacion)->assertStatus(422);
-    }
-
-    public function test_el_menor_no_puede_enviar_sin_la_autorizacion_y_si_despues_de_subirla(): void
-    {
-        [$aspirante, $postulacion] = $this->guardarComoMenor();
-
-        $respuesta = $this->actingAs($aspirante)->postJson("/api/postulaciones/{$postulacion->id}/enviar")->assertStatus(422);
-        $this->assertSame('autorizacion_representante', $respuesta->json('faltantes.0.codigo'));
-
-        $this->subirAutorizacion($aspirante, $postulacion)->assertCreated();
-
-        $this->assertSame('subido', $this->autorizacionEnEstado($aspirante, $postulacion)['estado']);
-        $this->actingAs($aspirante)->postJson("/api/postulaciones/{$postulacion->id}/enviar")->assertOk();
-    }
-
-    public function test_la_autorizacion_no_cambia_el_puntaje_de_documentos(): void
+    public function test_un_menor_no_ve_ni_necesita_un_documento_de_autorizacion(): void
     {
         [$aspirante, $postulacion] = $this->guardarComoMenor(['hoja_de_vida' => true]);
 
-        $ids = $postulacion->convocatoria->documentos()->pluck('parametros.codigo')->all();
+        $documentos = $this->actingAs($aspirante)->getJson("/api/postulaciones/{$postulacion->id}/documentos")->assertOk()->json('data.documentos');
 
-        $this->assertSame(['hoja_de_vida'], $ids);
+        $this->assertSame(['hoja_de_vida'], array_column(array_column($documentos, 'parametro'), 'codigo'));
+        $this->assertSame('pendiente', $documentos[0]['estado']);
     }
 
-    public function test_el_gestor_no_ve_ni_puede_asignar_la_autorizacion_a_una_convocatoria(): void
+    public function test_un_menor_envia_su_postulacion_sin_subir_ninguna_autorizacion(): void
     {
-        $ficha = $this->ficha();
-        $instructor = $this->instructor($ficha);
+        [$aspirante, $postulacion] = $this->guardarComoMenor(['hoja_de_vida' => false], ['acepta_tratamiento_datos' => true]);
 
-        $catalogo = $this->actingAs($instructor)->getJson('/api/parametros?tema=tipo_documento')->assertOk()->json('data');
-        $this->assertNotContains('autorizacion_representante', array_column($catalogo, 'codigo'));
+        $this->actingAs($aspirante)->postJson("/api/postulaciones/{$postulacion->id}/enviar")
+            ->assertOk()
+            ->assertJsonPath('data.estado.codigo', 'postulada');
+    }
 
-        $this->actingAs($instructor)
-            ->postJson('/api/convocatorias', ['nombre' => 'Con autorización', 'documentos' => [['codigo' => 'autorizacion_representante', 'ponderacion' => 10]]])
-            ->assertStatus(422);
+    public function test_el_representante_se_guarda_con_todos_sus_datos_de_contacto(): void
+    {
+        [$aspirante, $postulacion] = $this->guardarComoMenor(['hoja_de_vida' => false], [
+            'representante_telefono_alterno' => '6044445555',
+            'representante_departamento' => '05',
+            'representante_municipio' => '05001',
+        ]);
+
+        $this->actingAs($aspirante)->getJson("/api/postulaciones/{$postulacion->id}/datos-personales")
+            ->assertOk()
+            ->assertJsonPath('data.datos.representante_tipo_documento.codigo', 'cc')
+            ->assertJsonPath('data.datos.representante_correo', 'marta.perez@example.com')
+            ->assertJsonPath('data.datos.representante_telefono_alterno', '6044445555')
+            ->assertJsonPath('data.datos.representante_municipio.nombre', 'Medellín')
+            ->assertJsonPath('data.datos.representante_conoce', true);
+    }
+
+    public function test_el_correo_del_representante_debe_ser_valido(): void
+    {
+        [$aspirante, $postulacion] = $this->borrador();
+
+        $this->guardar($aspirante, $postulacion, $this->cuerpo([
+            'fecha_nacimiento' => now('America/Bogota')->subYears(17)->toDateString(),
+            'representante_correo' => 'no-es-un-correo',
+        ] + $this->representante()))
+            ->assertStatus(422)->assertJsonValidationErrors('representante_correo');
+    }
+
+    public function test_el_representante_no_puede_identificarse_con_tarjeta_de_identidad(): void
+    {
+        [$aspirante, $postulacion] = $this->borrador();
+
+        $this->guardar($aspirante, $postulacion, $this->cuerpo([
+            'fecha_nacimiento' => now('America/Bogota')->subYears(17)->toDateString(),
+            'representante_tipo_documento' => 'ti',
+        ] + $this->representante()))
+            ->assertStatus(422)->assertJsonValidationErrors('representante_tipo_documento');
+    }
+
+    public function test_la_residencia_del_representante_es_opcional_pero_va_completa(): void
+    {
+        [$aspirante, $postulacion] = $this->borrador();
+        $base = $this->cuerpo(['fecha_nacimiento' => now('America/Bogota')->subYears(17)->toDateString()] + $this->representante());
+
+        $this->guardar($aspirante, $postulacion, $base + ['representante_departamento' => '05'])
+            ->assertStatus(422)->assertJsonValidationErrors('representante_municipio');
+        // Cartagena (13001) no es de Antioquia (05).
+        $this->guardar($aspirante, $postulacion, $base + ['representante_departamento' => '05', 'representante_municipio' => '13001'])
+            ->assertStatus(422)->assertJsonValidationErrors('representante_municipio');
+
+        $this->guardar($aspirante, $postulacion, $base)->assertOk();
+    }
+
+    public function test_quien_revisa_lee_los_datos_con_alcance_por_ficha_y_sin_borradores(): void
+    {
+        [$aspirante, $postulacion] = $this->guardarComoMenor(['hoja_de_vida' => false]);
+        $ficha = $postulacion->convocatoria->ficha;
+        $revisor = $this->instructor($ficha);
+        $otraFicha = $this->instructor($this->ficha('2631620'));
+        $url = "/api/revision/postulaciones/{$postulacion->id}/datos-personales";
+
+        // En borrador no es un postulante todavía.
+        $this->actingAs($revisor)->getJson($url)->assertNotFound();
+
+        $postulacion->update(['estado_id' => $this->parametroId('estado_postulacion', 'postulada')]);
+
+        $this->actingAs($revisor)->getJson($url)
+            ->assertOk()
+            ->assertJsonPath('data.es_menor', true)
+            ->assertJsonPath('data.datos.representante_nombre', 'Marta Pérez')
+            ->assertJsonPath('data.datos.representante_correo', 'marta.perez@example.com');
+        // Fuera de su ficha no existe; y el propio aspirante no usa la ruta de revisión.
+        $this->actingAs($otraFicha)->getJson($url)->assertNotFound();
+        $this->actingAs($aspirante)->getJson($url)->assertForbidden();
     }
 }

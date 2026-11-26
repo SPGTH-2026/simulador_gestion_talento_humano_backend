@@ -48,6 +48,16 @@ class DatosPersonalesRequest extends FormRequest
             'representante_documento' => ['nullable', 'string', 'regex:'.self::DOCUMENTO],
             'representante_telefono' => ['nullable', 'string', 'regex:'.self::TELEFONO],
             'representante_parentesco' => ['nullable', 'string', 'min:3', 'max:40'],
+            'representante_tipo_documento' => ['nullable', 'string'],
+            'representante_correo' => ['nullable', 'email', 'max:150'],
+            'representante_telefono_alterno' => ['nullable', 'string', 'regex:'.self::TELEFONO],
+            // Residencia del representante: opcional, pero si se da va completa y el municipio debe ser de ese departamento.
+            'representante_departamento' => ['nullable', 'string', 'exists:departamentos,codigo'],
+            'representante_municipio' => [
+                'nullable', 'string',
+                Rule::exists('municipios', 'codigo')->where('departamento_codigo', (string) $this->input('representante_departamento')),
+            ],
+            'representante_conoce' => ['nullable', 'boolean'],
             // La autorización se registra aparte de los datos: puede llegar marcada o no. Una vez dada no se revoca por aquí.
             'acepta_tratamiento_datos' => ['sometimes', 'boolean'],
         ];
@@ -80,10 +90,29 @@ class DatosPersonalesRequest extends FormRequest
                 return;
             }
 
-            foreach (['representante_nombre', 'representante_documento', 'representante_telefono', 'representante_parentesco'] as $campo) {
+            $obligatorios = [
+                'representante_nombre', 'representante_tipo_documento', 'representante_documento', 'representante_telefono',
+                'representante_correo', 'representante_parentesco',
+            ];
+            foreach ($obligatorios as $campo) {
                 if (! $this->filled($campo) && ! $validator->errors()->has($campo)) {
                     $validator->errors()->add($campo, 'Como eres menor de edad, este dato del representante legal es obligatorio.');
                 }
+            }
+
+            // La autorización se firma en persona al contratar: aquí solo se declara que el representante conoce la postulación.
+            if (! $this->boolean('representante_conoce')) {
+                $validator->errors()->add('representante_conoce', 'Debes declarar que tu representante legal conoce tu postulación.');
+            }
+
+            // El representante es una persona adulta: no puede identificarse con tarjeta de identidad.
+            if ($this->input('representante_tipo_documento') === 'ti') {
+                $validator->errors()->add('representante_tipo_documento', 'El representante legal debe ser mayor de edad: elige otro tipo de documento.');
+            }
+
+            // Residencia opcional: departamento y municipio van juntos.
+            if ($this->filled('representante_departamento') xor $this->filled('representante_municipio')) {
+                $validator->errors()->add('representante_municipio', 'Elige el departamento y el municipio de residencia del representante, o deja ambos en blanco.');
             }
         }];
     }
@@ -119,6 +148,11 @@ class DatosPersonalesRequest extends FormRequest
             'representante_documento' => 'documento del representante',
             'representante_telefono' => 'teléfono del representante',
             'representante_parentesco' => 'parentesco',
+            'representante_tipo_documento' => 'tipo de documento del representante',
+            'representante_correo' => 'correo del representante',
+            'representante_telefono_alterno' => 'teléfono alterno del representante',
+            'representante_departamento' => 'departamento del representante',
+            'representante_municipio' => 'municipio del representante',
             'acepta_tratamiento_datos' => 'autorización de datos',
         ];
     }

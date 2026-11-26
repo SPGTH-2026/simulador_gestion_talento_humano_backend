@@ -20,8 +20,6 @@ use Illuminate\Support\Collection;
  */
 class DocumentosDePostulacion
 {
-    private ?Parametro $autorizacion = null;
-
     /** Motivo que acompaña a la libreta cuando el aspirante no ha registrado sexo. */
     public const MOTIVO_FALTA_SEXO =
         'Llena tus datos personales para saber si aplica la libreta militar.';
@@ -170,28 +168,9 @@ class DocumentosDePostulacion
             $faltantes[] = $faltante;
         }
 
-        // Un menor de edad también debe subir la autorización de su representante (requisito por edad, sin porcentaje).
-        $autorizacion = $postulacion->datosPersonales?->esMenor() ? $this->autorizacionRepresentante() : null;
-        if ($autorizacion && ! $subidos->has($autorizacion->id)) {
-            $faltantes[] = ['codigo' => $autorizacion->codigo, 'nombre' => $autorizacion->nombre];
-        }
-
         return $faltantes;
     }
 
-    /** La autorización que EXIGE esta postulación: solo si la persona es menor de edad; null en los demás casos. */
-    public function autorizacionRequerida(Postulacion $postulacion): ?Parametro
-    {
-        $postulacion->loadMissing('datosPersonales');
-
-        return $postulacion->datosPersonales?->esMenor() ? $this->autorizacionRepresentante() : null;
-    }
-
-    /** Parámetro de la autorización del representante (se resuelve una vez por instancia del servicio). */
-    public function autorizacionRepresentante(): ?Parametro
-    {
-        return $this->autorizacion ??= Parametro::porTemaYCodigo('tipo_documento', Parametro::DOC_AUTORIZACION_REPRESENTANTE);
-    }
 
     /** ¿Están todos los obligatorios subidos o en 'no_aplica'? */
     public function completo(Postulacion $postulacion): bool
