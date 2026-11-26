@@ -45,6 +45,13 @@ class SocialAuthController extends Controller
         $respuesta = Socialite::driver($provider)->redirect();
         $request->session()->put(self::CLAVE_INICIO, now()->timestamp);
 
+        // DIAGNÓSTICO TEMPORAL (quitar después): solo hashes y booleanos, nunca el id de sesión ni el state.
+        Log::info('Diagnóstico Google: inicio.', [
+            'sesion' => substr(hash('sha256', (string) $request->session()->getId()), 0, 12),
+            'state_en_sesion' => $request->session()->has(self::CLAVE_STATE),
+            'inicio_en_sesion' => $request->session()->has(self::CLAVE_INICIO),
+        ]);
+
         return $respuesta;
     }
 
@@ -60,6 +67,15 @@ class SocialAuthController extends Controller
 
             return redirect($front);
         }
+
+        // DIAGNÓSTICO TEMPORAL (quitar después): solo hashes y booleanos, nunca el id de sesión ni el state.
+        Log::info('Diagnóstico Google: callback.', [
+            'sesion' => substr(hash('sha256', (string) $request->session()->getId()), 0, 12),
+            'state_en_sesion' => $request->session()->has(self::CLAVE_STATE),
+            'inicio_en_sesion' => $request->session()->has(self::CLAVE_INICIO),
+            'state_en_url' => $request->query('state') !== null,
+            'claves_de_sesion' => count($request->session()->all()),
+        ]);
 
         // Antes de canjear el código con Google: el intento tiene que continuar un inicio hecho desde ESTE navegador.
         $motivo = $this->estadoDelInicioValido($request);
