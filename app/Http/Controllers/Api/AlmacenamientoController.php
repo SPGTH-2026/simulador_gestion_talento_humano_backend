@@ -9,7 +9,9 @@ use App\Models\PostulacionDocumento;
 use App\Models\User;
 use App\Services\Almacenamiento\UsoAlmacenamiento;
 use App\Services\Documentos\EscribeDocumentoPostulacion;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Validation\Rule;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -87,10 +89,7 @@ class AlmacenamientoController extends Controller
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
-        $listado = PostulacionDocumento::query()
-            ->with(['postulacion.user:id,name', 'postulacion.convocatoria:id,nombre,ficha_id', 'postulacion.convocatoria.documentos', 'parametro:id,nombre'])
-            ->whereHas('postulacion.convocatoria', fn ($q) => $q->where('ficha_id', $ficha->id))
-            ->orderByDesc('id')
+        $listado = $this->consultaDeFicha($ficha, $request)
             ->paginate($datos['per_page'] ?? 20, ['*'], 'page', $datos['page'] ?? 1);
 
         return response()->json([
@@ -103,6 +102,61 @@ class AlmacenamientoController extends Controller
                 'total' => $listado->total(),
             ],
         ]);
+    }
+
+    /**
+     * Ids de TODOS los documentos de la ficha que se pueden borrar y que cumplen la búsqueda y el filtro (no solo los de la
+     * página). Sirve para «seleccionar todos los resultados».
+     */
+    public function idsBorrables(Request $request, Ficha $ficha): JsonResponse
+    {
+        $this->exigirFichaDelActor($request->user(), $ficha);
+
+        $ids = $this->consultaDeFicha($ficha, $request)
+            ->with(['postulacion.convocatoria.documentos', 'parametro:id,nombre'])
+            ->get()
+            ->filter(fn (PostulacionDocumento $d) => $this->presentarDocumento($d)['borrable'])
+            ->pluck('id')
+            ->values();
+
+        return response()->json(['data' => ['ids' => $ids, 'total' => $ids->count()]]);
+    }
+
+    /**
+     * Documentos de una ficha con la búsqueda y el filtro de tipo de la petición:
+     *  - q: texto que se busca en el nombre o correo del aspirante, en el título o nombre del documento y en la convocatoria.
+     *  - tipo: «adicional» (sin requisito) o «requerido» (de la convocatoria).
+     */
+    private function consultaDeFicha(Ficha $ficha, Request $request): Builder
+    {
+        $filtros = $request->validate([
+            'q' => ['nullable', 'string', 'max:120'],
+            'tipo' => ['nullable', Rule::in(['adicional', 'requerido'])],
+        ]);
+
+        $consulta = PostulacionDocumento::query()
+            ->with(['postulacion.user:id,name,email', 'postulacion.convocatoria:id,nombre,ficha_id', 'postulacion.convocatoria.documentos', 'parametro:id,nombre'])
+            ->whereHas('postulacion.convocatoria', fn ($q) => $q->where('ficha_id', $ficha->id))
+            ->orderByDesc('id');
+
+        if (($filtros['tipo'] ?? null) === 'adicional') {
+            $consulta->whereNull('parametro_id');
+        } elseif (($filtros['tipo'] ?? null) === 'requerido') {
+            $consulta->whereNotNull('parametro_id');
+        }
+
+        $termino = trim((string) ($filtros['q'] ?? ''));
+        if ($termino !== '') {
+            $patron = '%'.mb_strtolower($termino).'%';
+            $consulta->where(function (Builder $q) use ($patron) {
+                $q->whereRaw('LOWER(titulo) LIKE ?', [$patron])
+                    ->orWhereHas('parametro', fn ($p) => $p->whereRaw('LOWER(nombre) LIKE ?', [$patron]))
+                    ->orWhereHas('postulacion.user', fn ($u) => $u->whereRaw('LOWER(name) LIKE ?', [$patron])->orWhereRaw('LOWER(email) LIKE ?', [$patron]))
+                    ->orWhereHas('postulacion.convocatoria', fn ($c) => $c->whereRaw('LOWER(nombre) LIKE ?', [$patron]));
+            });
+        }
+
+        return $consulta;
     }
 
     /**
@@ -128,7 +182,6 @@ class AlmacenamientoController extends Controller
 
         $borrados = [];
         $omitidos = [];
-        $fichasTocadas = [];
 
         foreach ($ids as $id) {
             $documento = $documentos->get($id);
@@ -143,14 +196,9 @@ class AlmacenamientoController extends Controller
             try {
                 $this->escribe->eliminar($documento);
                 $borrados[] = $id;
-                $fichasTocadas[] = (int) $documento->postulacion->convocatoria->ficha_id;
             } catch (ValidationException $e) {
                 $omitidos[] = ['id' => $id, 'motivo' => collect($e->errors())->flatten()->first() ?? 'No se pudo borrar.'];
             }
-        }
-
-        foreach (array_unique($fichasTocadas) as $fichaId) {
-            $this->uso->olvidarFicha($fichaId);
         }
 
         // Auditoría: quién borró qué. Solo ids, nunca nombres ni rutas de archivo.

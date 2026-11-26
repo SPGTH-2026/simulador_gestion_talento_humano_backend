@@ -27,6 +27,9 @@ enum TipoNotificacion: string
     // Selección programó, reprogramó o canceló una cita (entrevista o prueba técnica): el aspirante la consulta en «Mis postulaciones».
     case Citacion = 'citacion';
 
+    // El super admin convirtió la cuenta en instructor y todavía no tiene ninguna ficha: debe crear la suya.
+    case InstructorCrearFicha = 'instructor_crear_ficha';
+
     // Estados de la convocatoria, vistos por el aspirante.
     case ConvocatoriaPublicada = 'convocatoria_publicada';
     case ConvocatoriaRecepcionCerrada = 'convocatoria_recepcion_cerrada';

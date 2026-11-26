@@ -3,21 +3,20 @@
 namespace App\Services\Almacenamiento;
 
 use App\Models\Ficha;
-use App\Support\RutaDocumento;
+use App\Models\PostulacionDocumento;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 /**
  * Cuánto ocupa lo que guarda el sistema:
  *
  *  - La base de datos (Supabase/Postgres en producción, o MySQL en local), con la misma conexión que usa la aplicación.
- *  - Los documentos de cada ficha: los archivos bajo fichas/{código}/ en el disco de documentos (R2 en producción).
+ *  - Los documentos: el tamaño que se guardó en la base al subir cada archivo. Así se cuentan también los documentos
+ *    antiguos, aunque estén en una carpeta que no sigue la organización por ficha, y no depende de que el bucket responda.
  *
- * Listar el bucket cuesta una petición por cada mil objetos, así que el resultado se guarda en caché unos minutos. Un
- * fallo al consultar el disco no se guarda: la siguiente vez se vuelve a intentar.
+ * La medida de la base se guarda en caché unos minutos; la de los documentos es una suma de la base y se calcula al momento.
  */
 final class UsoAlmacenamiento
 {
@@ -51,73 +50,21 @@ final class UsoAlmacenamiento
         });
     }
 
-    /**
-     * Archivos y bytes de la carpeta de una ficha en el disco de documentos. Si el disco no responde, devuelve nulos y
-     * no lo guarda en caché.
-     *
-     * @return array{bytes: ?int, objetos: ?int}
-     */
+    /** Documentos y bytes registrados de una ficha, con los documentos antiguos incluidos. */
     public function documentosDeFicha(Ficha $ficha): array
     {
-        $clave = $this->claveFicha($ficha);
+        $fila = PostulacionDocumento::query()
+            ->whereHas('postulacion.convocatoria', fn ($q) => $q->where('ficha_id', $ficha->id))
+            ->selectRaw('count(*) as objetos, coalesce(sum(tamano_bytes), 0) as bytes')
+            ->first();
 
-        if (Cache::has($clave)) {
-            return Cache::get($clave);
-        }
-
-        try {
-            $prefijo = 'fichas/'.RutaDocumento::segmentoFicha($ficha).'/';
-            $disco = Storage::disk((string) config('filesystems.documentos_disk'))->getDriver();
-
-            $bytes = 0;
-            $objetos = 0;
-            foreach ($disco->listContents($prefijo, true) as $item) {
-                if ($item->isFile()) {
-                    $bytes += (int) ($item->fileSize() ?? 0);
-                    $objetos++;
-                }
-            }
-        } catch (Throwable $e) {
-            Log::warning('No se pudo medir los documentos de una ficha.', ['ficha_id' => $ficha->id, 'error' => $e->getMessage()]);
-
-            return ['bytes' => null, 'objetos' => null];
-        }
-
-        $resultado = ['bytes' => $bytes, 'objetos' => $objetos];
-        Cache::put($clave, $resultado, self::SEGUNDOS_EN_CACHE);
-
-        return $resultado;
+        return ['bytes' => (int) $fila->bytes, 'objetos' => (int) $fila->objetos];
     }
 
-    /**
-     * Bytes de TODOS los archivos del disco de documentos (no solo de una ficha). Nulo si el disco no responde.
-     */
-    public function totalDocumentos(): ?int
+    /** Bytes de todos los documentos registrados en el sistema. */
+    public function totalDocumentos(): int
     {
-        $clave = 'almacenamiento.documentos.total';
-
-        if (Cache::has($clave)) {
-            return Cache::get($clave);
-        }
-
-        try {
-            $disco = Storage::disk((string) config('filesystems.documentos_disk'))->getDriver();
-
-            $bytes = 0;
-            foreach ($disco->listContents('', true) as $item) {
-                if ($item->isFile()) {
-                    $bytes += (int) ($item->fileSize() ?? 0);
-                }
-            }
-        } catch (Throwable $e) {
-            Log::warning('No se pudo medir el total de documentos.', ['error' => $e->getMessage()]);
-
-            return null;
-        }
-
-        Cache::put($clave, $bytes, self::SEGUNDOS_EN_CACHE);
-
-        return $bytes;
+        return (int) PostulacionDocumento::query()->sum('tamano_bytes');
     }
 
     /**
@@ -134,7 +81,7 @@ final class UsoAlmacenamiento
         $limiteBase = $this->bytesDeLimite('limite_base_mb');
         $limiteDocumentos = $this->bytesDeLimite('limite_documentos_mb');
 
-        $usadoTotal = $base['bytes'] !== null && $documentos !== null ? $base['bytes'] + $documentos : null;
+        $usadoTotal = $base['bytes'] !== null ? $base['bytes'] + $documentos : null;
 
         $uso = [
             'porcentaje' => $this->porcentaje($usadoTotal, $limiteBase + $limiteDocumentos),
@@ -172,18 +119,5 @@ final class UsoAlmacenamiento
     private function bytesDeLimite(string $clave): int
     {
         return (int) round((float) config("almacenamiento.{$clave}") * 1048576);
-    }
-
-    /** Olvida la medida de una ficha (se llama después de borrar sus documentos). */
-    public function olvidarFicha(int $fichaId): void
-    {
-        Cache::forget('almacenamiento.ficha.'.$fichaId);
-        // El total del sistema también cambia al borrar: se vuelve a medir la próxima vez.
-        Cache::forget('almacenamiento.documentos.total');
-    }
-
-    private function claveFicha(Ficha $ficha): string
-    {
-        return 'almacenamiento.ficha.'.$ficha->id;
     }
 }

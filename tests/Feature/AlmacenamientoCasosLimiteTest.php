@@ -71,36 +71,23 @@ class AlmacenamientoCasosLimiteTest extends TestCase
         return $documentos;
     }
 
-    public function test_un_disco_que_no_existe_muestra_no_disponible_sin_romper_el_resumen(): void
+    public function test_un_documento_antiguo_sin_archivo_en_el_disco_sigue_contando_en_el_espacio(): void
     {
+        // Documentos subidos antes de la organización por ficha: el registro existe y el archivo ya no está en la carpeta
+        // nueva. El espacio sale del registro, así que no desaparece del resumen.
         $ficha = $this->ficha('2896411');
-        $this->conAdicionales($ficha, 1);
-        config(['filesystems.documentos_disk' => 'disco-que-no-existe']);
+        [$documento] = $this->conAdicionales($ficha, 1);
+        Storage::disk($this->disco)->delete($documento->ruta);
         $admin = $this->usuario(Role::SuperAdmin);
 
-        $respuesta = $this->actingAs($admin)->getJson('/api/almacenamiento/resumen')->assertOk();
+        $fila = collect($this->actingAs($admin)->getJson('/api/almacenamiento/resumen')->json('data.fichas'))
+            ->firstWhere('codigo', '2896411');
 
-        $fila = collect($respuesta->json('data.fichas'))->firstWhere('codigo', '2896411');
-        $this->assertNull($fila['almacenamiento']['bytes']);
-        $this->assertNull($fila['almacenamiento']['objetos']);
-        // Los documentos registrados siguen contándose: la base no depende del disco.
-        $this->assertSame(1, $fila['documentos']);
+        $this->assertSame(10, $fila['almacenamiento']['bytes']);
+        $this->assertSame(1, $fila['almacenamiento']['objetos']);
     }
 
-    public function test_un_fallo_del_disco_no_se_guarda_en_cache(): void
-    {
-        $ficha = $this->ficha('2896411');
-        $this->conAdicionales($ficha, 1);
-
-        config(['filesystems.documentos_disk' => 'disco-que-no-existe']);
-        $this->assertNull(app(UsoAlmacenamiento::class)->documentosDeFicha($ficha)['bytes']);
-
-        // Cuando el disco vuelve, la siguiente consulta mide de verdad (el fallo no quedó guardado).
-        config(['filesystems.documentos_disk' => $this->disco]);
-        $this->assertSame(10, app(UsoAlmacenamiento::class)->documentosDeFicha($ficha)['bytes']);
-    }
-
-    public function test_la_medida_queda_en_cache_hasta_que_se_olvida_o_se_borra(): void
+    public function test_el_espacio_se_actualiza_al_instante_sin_esperar_caché(): void
     {
         $ficha = $this->ficha('2896411');
         $documentos = $this->conAdicionales($ficha, 1);
@@ -108,13 +95,13 @@ class AlmacenamientoCasosLimiteTest extends TestCase
 
         $this->assertSame(10, $this->actingAs($admin)->getJson('/api/almacenamiento/resumen')->json('data.totales.bytes'));
 
-        // Un archivo nuevo no se ve de inmediato: la medida dura unos minutos en caché.
+        // Un archivo suelto que no está registrado no cuenta: el espacio es de lo que el sistema registró.
         Storage::disk($this->disco)->put('fichas/2896411/extra.pdf', str_repeat('y', 500));
         $this->assertSame(10, $this->actingAs($admin)->getJson('/api/almacenamiento/resumen')->json('data.totales.bytes'));
 
-        // Al borrar un documento la medida de la ficha se recalcula (incluye el archivo nuevo).
+        // Al borrar un documento, el espacio baja de inmediato.
         $this->actingAs($admin)->postJson('/api/almacenamiento/documentos/borrar', ['ids' => [$documentos[0]->id]])->assertOk();
-        $this->assertSame(500, $this->actingAs($admin)->getJson('/api/almacenamiento/resumen')->json('data.totales.bytes'));
+        $this->assertSame(0, $this->actingAs($admin)->getJson('/api/almacenamiento/resumen')->json('data.totales.bytes'));
     }
 
     public function test_la_lista_de_documentos_se_pagina(): void

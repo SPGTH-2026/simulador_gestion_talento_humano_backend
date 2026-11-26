@@ -148,6 +148,7 @@ Route::middleware(['auth:sanctum', 'verified', 'ficha'])->group(function () {
         Route::get('fichas/{ficha}/documentos', [AlmacenamientoController::class, 'documentos'])->whereNumber('ficha');
     });
     Route::middleware('can:almacenamiento:gestionar')->prefix('almacenamiento')->group(function () {
+        Route::get('fichas/{ficha}/documentos/ids', [AlmacenamientoController::class, 'idsBorrables'])->whereNumber('ficha');
         Route::post('documentos/borrar', [AlmacenamientoController::class, 'borrar']);
     });
 
