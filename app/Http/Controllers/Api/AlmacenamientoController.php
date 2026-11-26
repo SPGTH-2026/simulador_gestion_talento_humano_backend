@@ -66,7 +66,11 @@ class AlmacenamientoController extends Controller
             ],
         ];
 
-        if ($actor->role === Role::SuperAdmin) {
+        // El porcentaje total lo ven todos los que gestionan almacenamiento. El detalle de la base, solo el super admin.
+        $esSuperAdmin = $actor->role === Role::SuperAdmin;
+        $data['uso'] = $this->uso->resumenUso(conDetalle: $esSuperAdmin);
+
+        if ($esSuperAdmin) {
             $data['base'] = $this->uso->base();
         }
 
