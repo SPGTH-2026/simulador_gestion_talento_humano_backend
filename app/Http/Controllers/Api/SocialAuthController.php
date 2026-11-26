@@ -36,6 +36,12 @@ class SocialAuthController extends Controller
     /** Vigencia de un inicio de acceso con Google: pasado este tiempo hay que volver a empezar. */
     private const VIGENCIA_INICIO_SEGUNDOS = 600;
 
+    /**
+     * TEMPORAL (recuperación del acceso, 26-nov-2026): si la sesión no tiene state, el callback canjea el código igual, como
+     * hacía 90a9af4. Ponerlo en false restituye el rechazo estricto ('ausente') sin tocar nada más.
+     */
+    private const TOLERAR_SIN_STATE_EN_SESION = true;
+
     public function redirect(Request $request, string $provider)
     {
         abort_unless(in_array($provider, self::PROVIDERS, true), 404);
@@ -44,16 +50,6 @@ class SocialAuthController extends Controller
         // si trae ese mismo state, una sola vez y dentro de la vigencia; ver estadoDelInicioValido().
         $respuesta = Socialite::driver($provider)->redirect();
         $request->session()->put(self::CLAVE_INICIO, now()->timestamp);
-
-        // DIAGNÓSTICO TEMPORAL (quitar después): solo hashes y booleanos, nunca el id de sesión ni el state.
-        // Se guarda la sesión ya, para comprobar que su fila existe en la base antes de volver a Google.
-        $request->session()->save();
-        Log::info('Diagnóstico Google: inicio.', [
-            'sesion' => $this->huella((string) $request->session()->getId()),
-            'fila_en_base' => DB::table('sessions')->where('id', $request->session()->getId())->exists(),
-            'state_en_sesion' => $request->session()->has(self::CLAVE_STATE),
-            'inicio_en_sesion' => $request->session()->has(self::CLAVE_INICIO),
-        ]);
 
         return $respuesta;
     }
@@ -71,20 +67,15 @@ class SocialAuthController extends Controller
             return redirect($front);
         }
 
-        // DIAGNÓSTICO TEMPORAL (quitar después): solo hashes y booleanos, nunca el id de sesión ni el state.
-        Log::info('Diagnóstico Google: callback.', [
-            'sesion' => $this->huella((string) $request->session()->getId()),
-            'fila_en_base' => DB::table('sessions')->where('id', $request->session()->getId())->exists(),
-            'ultimas_sesiones' => DB::table('sessions')->orderByDesc('last_activity')->limit(10)
-                ->pluck('id')->map(fn ($id) => $this->huella((string) $id))->all(),
-            'state_en_sesion' => $request->session()->has(self::CLAVE_STATE),
-            'inicio_en_sesion' => $request->session()->has(self::CLAVE_INICIO),
-            'state_en_url' => $request->query('state') !== null,
-            'claves_de_sesion' => count($request->session()->all()),
-        ]);
-
         // Antes de canjear el código con Google: el intento tiene que continuar un inicio hecho desde ESTE navegador.
+        $sinStateEnSesion = (string) $request->session()->get(self::CLAVE_STATE, '') === '';
         $motivo = $this->estadoDelInicioValido($request);
+        if ($motivo === 'ausente' && $sinStateEnSesion && self::TOLERAR_SIN_STATE_EN_SESION) {
+            // TEMPORAL: comportamiento de la versión que funcionaba (90a9af4). Sin state en la sesión se canjea igual; un state
+            // presente que no coincide, o caducado, se sigue rechazando. Nunca se registran valores.
+            Log::warning('Acceso con Google sin state en la sesión: se acepta en modo permisivo temporal.', ['provider' => $provider]);
+            $motivo = 'ok';
+        }
         if ($motivo !== 'ok') {
             // El motivo describe qué comprobación falló; nunca se registran los valores del state ni del código.
             Log::warning('Acceso con Google rechazado: el inicio no es válido.', [
@@ -263,12 +254,6 @@ class SocialAuthController extends Controller
         $user->tokens()->delete();
         EmailOtp::where('email', $user->email)->delete();
         DB::table('password_reset_tokens')->where('email', $user->email)->delete();
-    }
-
-    /** DIAGNÓSTICO TEMPORAL: huella corta e irreversible de un identificador, para comparar sin mostrarlo. */
-    private function huella(string $valor): string
-    {
-        return substr(hash('sha256', $valor), 0, 12);
     }
 
     /**

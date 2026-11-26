@@ -33,15 +33,15 @@ Route::prefix('auth')->group(function () {
     Route::post('forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:otp-send');
     Route::post('reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:otp-check');
 
-    // OAuth: el callback llega desde accounts.google.com, no desde el front.
-    // Sanctum statefulApi() solo da sesión si el request viene de un dominio
-    // stateful, así que aquí se fuerza 'web' para poder iniciar sesión.
-    Route::get('{provider}/redirect', [SocialAuthController::class, 'redirect'])->middleware('web');
-    Route::get('{provider}/callback', [SocialAuthController::class, 'callback'])->middleware('web');
+    // OAuth: el callback llega desde accounts.google.com, no desde el front, y Sanctum statefulApi() solo da sesión a las
+    // peticiones del front. 'sesion.web' abre la sesión web cuando Sanctum no lo hizo, y NUNCA dos veces: con 'web' a secas,
+    // una petición del front con cookie previa perdía la sesión (ver SesionWebUnaVez).
+    Route::get('{provider}/redirect', [SocialAuthController::class, 'redirect'])->middleware('sesion.web');
+    Route::get('{provider}/callback', [SocialAuthController::class, 'callback'])->middleware('sesion.web');
     // Aspirante que entró con Google y todavía no eligió su ficha: la cuenta se crea al elegirla.
-    Route::get('google/pendiente', [SocialAuthController::class, 'pendiente'])->middleware('web');
+    Route::get('google/pendiente', [SocialAuthController::class, 'pendiente'])->middleware('sesion.web');
     Route::post('google/pendiente/ficha', [SocialAuthController::class, 'completarPendiente'])
-        ->middleware(['web', 'throttle:login']);
+        ->middleware(['sesion.web', 'throttle:login']);
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('me', [AuthController::class, 'me']);

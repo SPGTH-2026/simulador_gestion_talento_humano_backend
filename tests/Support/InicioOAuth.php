@@ -2,6 +2,7 @@
 
 namespace Tests\Support;
 
+use Laravel\Socialite\Contracts\Factory;
 use Laravel\Socialite\Contracts\Provider;
 use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\User as UsuarioGoogle;
@@ -47,6 +48,18 @@ trait InicioOAuth
         $provider->shouldReceive('stateless')->andReturnSelf();
         $provider->shouldNotReceive('user');
         Socialite::shouldReceive('driver')->andReturn($provider);
+    }
+
+    /** Google rechaza el código (ya se gastó: invalid_grant). */
+    protected function googleRechazaElCodigo(): void
+    {
+        $provider = Mockery::mock(Provider::class);
+        $provider->shouldReceive('stateless')->andReturnSelf();
+        $provider->shouldReceive('user')->andThrow(new \RuntimeException('invalid_grant'));
+        // Sustituye cualquier simulación anterior de Google en la misma prueba.
+        $fabrica = Mockery::mock(Factory::class);
+        $fabrica->shouldReceive('driver')->andReturn($provider);
+        Socialite::swap($fabrica);
     }
 
     protected function callbackConEstado(?string $estado, string $codigo = 'codigo-secreto-123')
