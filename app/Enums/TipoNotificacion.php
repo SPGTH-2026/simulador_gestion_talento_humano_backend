@@ -24,6 +24,9 @@ enum TipoNotificacion: string
     // Una evaluación finalizada aprobó el umbral: el aspirante queda disponible para selección.
     case PasaSeleccion = 'pasa_seleccion';
 
+    // El super admin convirtió la cuenta en instructor y todavía no tiene ninguna ficha: debe crear la suya.
+    case InstructorCrearFicha = 'instructor_crear_ficha';
+
     // Estados de la convocatoria, vistos por el aspirante.
     case ConvocatoriaPublicada = 'convocatoria_publicada';
     case ConvocatoriaRecepcionCerrada = 'convocatoria_recepcion_cerrada';

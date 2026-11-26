@@ -118,15 +118,15 @@ class AlmacenamientoUsoTotalTest extends TestCase
         $this->assertSame($limite, $uso['limite_bytes']);
     }
 
-    public function test_si_el_disco_no_responde_el_porcentaje_queda_nulo_sin_romper_la_pantalla(): void
+    public function test_sin_documentos_el_porcentaje_de_documentos_es_cero_y_no_falla(): void
     {
-        config(['filesystems.documentos_disk' => 'disco-que-no-existe']);
+        config(['almacenamiento.limite_documentos_mb' => $this->limiteEnBytes(200)]);
         $instructor = $this->instructorDe($this->ficha('2896411'));
 
         $respuesta = $this->actingAs($instructor)->getJson('/api/almacenamiento/resumen')->assertOk();
 
-        $this->assertNull($respuesta->json('data.uso.documentos.porcentaje'));
-        $this->assertNull($respuesta->json('data.uso.porcentaje'));
+        $this->assertEquals(0.0, $respuesta->json('data.uso.documentos.porcentaje'));
+        $this->assertIsNumeric($respuesta->json('data.uso.porcentaje'));
     }
 
     public function test_al_borrar_el_total_de_documentos_se_actualiza(): void
