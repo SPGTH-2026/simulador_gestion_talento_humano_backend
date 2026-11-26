@@ -134,6 +134,12 @@ Route::middleware(['auth:sanctum', 'verified', 'ficha'])->group(function () {
         ->missing(fn () => abort(404, 'Postulación no encontrada.'))
         ->middleware('can:propio:postulaciones');
 
+    // Descartar una postulación retirada cuya convocatoria ya cerró: deja de aparecer en la lista de la persona.
+    Route::post('postulaciones/{postulacion}/descartar', [PostulacionEstadoController::class, 'descartar'])
+        ->whereNumber('postulacion')
+        ->missing(fn () => abort(404, 'Postulación no encontrada.'))
+        ->middleware('can:propio:postulaciones');
+
     // Envío del borrador: valida los documentos obligatorios y pasa a
     // 'postulada'. 'postulada' ya NO se alcanza con el PATCH anterior.
     Route::post('postulaciones/{postulacion}/enviar', [PostulacionEstadoController::class, 'enviar'])

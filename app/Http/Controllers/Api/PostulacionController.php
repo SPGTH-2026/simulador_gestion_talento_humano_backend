@@ -59,6 +59,8 @@ class PostulacionController extends Controller
         $listado = Postulacion::query()
             ->with(['estado', 'convocatoria.estado'])
             ->where('user_id', $request->user()->id)
+            // Las que la persona descartó (retirada y con la convocatoria cerrada) ya no aparecen en su lista.
+            ->whereNull('descartada_at')
             ->orderByDesc('fecha_postulacion')
             ->orderByDesc('id')
             ->paginate($datos['per_page'] ?? 20, ['*'], 'page', $datos['page'] ?? 1);

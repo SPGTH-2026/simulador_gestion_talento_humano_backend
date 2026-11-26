@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Enums\ConvocatoriaEstado;
 use App\Enums\PostulacionEstado;
+use App\Enums\VentanaPostulacion;
 use App\Models\Postulacion;
 use App\Services\DocumentosDePostulacion;
 use App\Services\Notificaciones\Avisos;
@@ -167,6 +168,42 @@ class PostulacionEstadoController extends Controller
      *    hay sexo con libreta pedida, el motivo para indicarlo).
      *  - UPDATE condicionado por estado: si otra petición se adelantó -> 422.
      */
+    /**
+     * Descartar: la persona quita de su lista una postulación RETIRADA que ya no puede reabrir (su convocatoria cerró o dejó de
+     * estar publicada). No se borra nada: se marca `descartada_at` y el historial queda para quien gestiona la convocatoria.
+     *
+     *  - Ajena o inexistente -> 404 (antes de cualquier otra comprobación).
+     *  - No retirada -> 422 (un borrador se descarta con el PATCH de estado; una enviada se retira primero).
+     *  - Con la convocatoria todavía recibiendo postulaciones -> 422: aún puede reabrirla.
+     *  - Repetir la petición sobre una ya descartada es inofensivo (204).
+     */
+    public function descartar(Request $request, Postulacion $postulacion): JsonResponse
+    {
+        if ($postulacion->user_id !== $request->user()->id) {
+            abort(404, 'Postulación no encontrada.');
+        }
+
+        $postulacion->loadMissing(['estado', 'convocatoria.estado']);
+
+        if ($postulacion->estado?->codigo !== PostulacionEstado::Retirada->value) {
+            throw ValidationException::withMessages([
+                'postulacion' => 'Solo puedes descartar una postulación que ya retiraste.',
+            ]);
+        }
+
+        if ($postulacion->convocatoria->ventanaPostulacion() === VentanaPostulacion::Abierta) {
+            throw ValidationException::withMessages([
+                'postulacion' => 'La convocatoria sigue abierta: aún puedes reabrir esta postulación. Descártala cuando cierre.',
+            ]);
+        }
+
+        if ($postulacion->descartada_at === null) {
+            $postulacion->forceFill(['descartada_at' => now()])->save();
+        }
+
+        return response()->json(null, 204);
+    }
+
     /**
      * Para enviar o volver a postularse: los datos personales deben existir, estar autorizados y, si la persona es menor de
      * edad, incluir los datos de su representante legal. Una sola regla para las dos vías (enviar y reactivar).

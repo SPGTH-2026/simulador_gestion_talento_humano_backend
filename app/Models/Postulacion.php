@@ -26,6 +26,7 @@ class Postulacion extends Model
         return [
             'fecha_postulacion' => 'datetime',
             'fecha_retiro' => 'datetime',
+            'descartada_at' => 'datetime',
         ];
     }
 
