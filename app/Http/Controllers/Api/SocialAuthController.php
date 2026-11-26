@@ -45,16 +45,6 @@ class SocialAuthController extends Controller
         $respuesta = Socialite::driver($provider)->redirect();
         $request->session()->put(self::CLAVE_INICIO, now()->timestamp);
 
-        // DIAGNÓSTICO TEMPORAL (quitar después): solo hashes y booleanos, nunca el id de sesión ni el state.
-        // Se guarda la sesión ya, para comprobar que su fila existe en la base antes de volver a Google.
-        $request->session()->save();
-        Log::info('Diagnóstico Google: inicio.', [
-            'sesion' => $this->huella((string) $request->session()->getId()),
-            'fila_en_base' => DB::table('sessions')->where('id', $request->session()->getId())->exists(),
-            'state_en_sesion' => $request->session()->has(self::CLAVE_STATE),
-            'inicio_en_sesion' => $request->session()->has(self::CLAVE_INICIO),
-        ]);
-
         return $respuesta;
     }
 
@@ -70,18 +60,6 @@ class SocialAuthController extends Controller
 
             return redirect($front);
         }
-
-        // DIAGNÓSTICO TEMPORAL (quitar después): solo hashes y booleanos, nunca el id de sesión ni el state.
-        Log::info('Diagnóstico Google: callback.', [
-            'sesion' => $this->huella((string) $request->session()->getId()),
-            'fila_en_base' => DB::table('sessions')->where('id', $request->session()->getId())->exists(),
-            'ultimas_sesiones' => DB::table('sessions')->orderByDesc('last_activity')->limit(10)
-                ->pluck('id')->map(fn ($id) => $this->huella((string) $id))->all(),
-            'state_en_sesion' => $request->session()->has(self::CLAVE_STATE),
-            'inicio_en_sesion' => $request->session()->has(self::CLAVE_INICIO),
-            'state_en_url' => $request->query('state') !== null,
-            'claves_de_sesion' => count($request->session()->all()),
-        ]);
 
         // Antes de canjear el código con Google: el intento tiene que continuar un inicio hecho desde ESTE navegador.
         $motivo = $this->estadoDelInicioValido($request);
@@ -263,12 +241,6 @@ class SocialAuthController extends Controller
         $user->tokens()->delete();
         EmailOtp::where('email', $user->email)->delete();
         DB::table('password_reset_tokens')->where('email', $user->email)->delete();
-    }
-
-    /** DIAGNÓSTICO TEMPORAL: huella corta e irreversible de un identificador, para comparar sin mostrarlo. */
-    private function huella(string $valor): string
-    {
-        return substr(hash('sha256', $valor), 0, 12);
     }
 
     /**

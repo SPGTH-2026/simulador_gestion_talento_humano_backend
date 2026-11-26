@@ -52,10 +52,31 @@ cookie de sesión**. En SPGTH se cumple de dos maneras que aparecen en el reposi
 Un diseño con el `state` en una cookie firmada propia, o con intercambio del código desde la API, no tendría esta restricción;
 SPGTH no lo usa. Si la cookie no llega, **no se debe relajar la validación**: se corrige el recorrido de la sesión.
 
+## Incidente del 25-nov-2026: la sesión del inicio no se guardaba
+
+**Síntoma.** En producción, con el callback estricto, todo acceso con Google terminaba en `/login?error=oauth_estado` (motivo
+`ausente`). El callback antiguo lo ocultaba porque, si no encontraba el `state`, canjeaba el código en modo *stateless*.
+
+**Causa (reproducida con cookies reales en local y en `GoogleSesionNavegadorTest`).** Las rutas de Google viven en
+`routes/api.php`, donde `statefulApi()` ya abre la sesión para las peticiones del front, y además llevaban `->middleware('web')`.
+El inicio es una navegación desde una página del front (`Referer` del dominio *stateful*) y el navegador ya traía la cookie de
+sesión que dejaron `/sanctum/csrf-cookie` y `/api/auth/me`. En esa petición la sesión se iniciaba dos veces:
+1. Sanctum descifraba la cookie y leía la fila: el manejador de base de datos quedaba con `exists = true`.
+2. El grupo `web` volvía a descifrar la cookie ya descifrada, fallaba y la dejaba en `null`: la sesión arrancaba con un id nuevo.
+3. Al guardar, como `exists` seguía en `true`, se hacía `UPDATE … WHERE id = <nuevo>`, que no afecta a ninguna fila. La cookie
+   con el id nuevo sí salía al navegador, así que el callback llegaba con una sesión que no existe en la base.
+
+Sin cookie previa (una petición aislada con curl) no fallaba: el id nuevo se insertaba. El mismo defecto afectaba a
+`google/pendiente` y `google/pendiente/ficha` (alta nueva con elección de ficha), que también se llaman desde la SPA.
+
+**Corrección.** `sesion.web` (`App\Http\Middleware\SesionWebUnaVez`) usa la sesión que abrió Sanctum cuando la petición viene
+del front y, en cualquier otro caso (la vuelta desde Google), corre el grupo `web` completo, CSRF incluido. No cambia la
+validación del `state`, la caducidad, el uso único ni la vinculación segura, y no necesita cambios de configuración.
+
 ## Qué se pudo contrastar en el repositorio y qué queda pendiente
 
 **Confirmado en el repositorio**
-- Rutas `auth/{provider}/redirect|callback` con el middleware `web` (sesión por cookie, `SESSION_DRIVER=database` por defecto).
+- Rutas `auth/{provider}/redirect|callback` y `google/pendiente[/ficha]` con el middleware `sesion.web` (`SesionWebUnaVez`): sesión por cookie, `SESSION_DRIVER=database` por defecto.
 - `Login.jsx` navega a `VITE_GOOGLE_URL ?? '/api/auth/google/redirect'`; `client.js` usa `VITE_API_URL ?? '/api'`.
 - `vercel.json` reescribe `/api/:path*` y `/sanctum/:path*` hacia el backend desplegado y el resto a `/index.html`.
 - `config/session.php`: `same_site=lax`, `http_only=true`, `lifetime=120`, `domain` y `secure` por variables de entorno.
@@ -77,10 +98,13 @@ SPGTH no lo usa. Si la cookie no llega, **no se debe relajar la validación**: s
    - entrar con Google desde el acceso: debe iniciar sesión (o llevar a elegir ficha si la cuenta es nueva);
    - repetir con la pestaña anterior o el botón «atrás»: debe volver al inicio sin error 500;
    - abrir una URL de callback sin haber iniciado el flujo: debe mostrar el aviso `oauth_estado`.
-4. Reversión: revertir el commit del backend (no hay migraciones ni datos que deshacer).
+4. Reversión: revertir el commit del backend (no hay migraciones ni datos que deshacer). Volver a `web` a secas reabre el fallo.
 
 ## Pruebas
 
+- `tests/Feature/GoogleSesionNavegadorTest.php` con `tests/Support/NavegadorReal.php`: cookies cifradas que viajan entre peticiones,
+  driver `database`, `Referer` del front o de Google y estado del servidor reiniciado en cada petición. Cubre cuenta vinculada, alta
+  nueva con ficha, callback inválido, reintento, dos pestañas y pestaña antigua.
 - `tests/Feature/SocialEstadoOAuthTest.php`: validación del `state`, sesión abierta y flujos válidos.
 - `tests/Feature/SocialCallbackSessionTest.php` y `SocialVinculacionSeguraTest.php`: acceso y vinculación, ahora con el inicio real.
 - `tests/Support/InicioOAuth.php`: hace el inicio de verdad (controlador y Socialite reales) y **solo simula el canje del código con
