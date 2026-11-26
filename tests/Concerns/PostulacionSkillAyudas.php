@@ -85,12 +85,18 @@ trait PostulacionSkillAyudas
         ]);
     }
 
+    /** La postulación pasa a ENVIADA: ya no se edita y los revisores la ven (un borrador no es un postulante). */
+    private function enviada(Postulacion $postulacion): void
+    {
+        $postulacion->update(['estado_id' => $this->parametroId('estado_postulacion', 'postulada')]);
+    }
+
     private function crearPostulacion(Convocatoria $convocatoria, User $usuario, array $overrides = []): Postulacion
     {
         return Postulacion::create($overrides + [
             'convocatoria_id' => $convocatoria->id,
             'user_id' => $usuario->id,
-            'estado_id' => $this->parametroId('estado_postulacion', 'postulada'),
+            'estado_id' => $this->parametroId('estado_postulacion', 'borrador'),
             'fecha_postulacion' => now(),
         ]);
     }

@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\Storage;
 
 trait EvaluacionReenvioReferenciaAyudas
 {
+    use MientrasEditable;
+
     private static int $codigoSecuencia = 0;
 
     private Ficha $ficha;
@@ -164,11 +166,12 @@ trait EvaluacionReenvioReferenciaAyudas
     /** El aspirante reemplaza su hoja de vida (un obligatorio solo se reemplaza, no se elimina). */
     private function reemplazarHojaDeVida()
     {
-        return $this->actingAs($this->postulacion->user)->withHeaders(['Accept' => 'application/json'])
+        // Enviada la postulación no se edita: el cambio se simula con la postulación retirada (ver MientrasEditable).
+        return $this->mientrasEditable($this->postulacion, fn () => $this->actingAs($this->postulacion->user)->withHeaders(['Accept' => 'application/json'])
             ->post("/api/postulaciones/{$this->postulacion->id}/documentos", [
                 'codigo' => 'hoja_de_vida',
                 'archivo' => UploadedFile::fake()->create('hoja_nueva.pdf', 100, 'application/pdf'),
-            ]);
+            ]));
     }
 
     /** @return array<int,string> */

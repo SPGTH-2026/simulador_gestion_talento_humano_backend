@@ -24,7 +24,8 @@ class PostulacionEstadoDocumentosTest extends TestCase
         );
         $skillA = ConvocatoriaSkill::create(['convocatoria_id' => $convocatoria->id, 'nombre' => 'Excel avanzado']);
         $skillB = ConvocatoriaSkill::create(['convocatoria_id' => $convocatoria->id, 'nombre' => 'Power BI']);
-        $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        // Enviada: el test también la lee como revisor, y un borrador no entra a revisión.
+        $postulacion = $this->crearPostulacion($convocatoria, $aspirante, ['estado_id' => $this->parametroId('estado_postulacion', 'postulada')]);
 
         $respuesta = $this->actingAs($aspirante)
             ->getJson("/api/postulaciones/{$postulacion->id}/documentos")

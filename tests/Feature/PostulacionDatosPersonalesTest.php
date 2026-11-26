@@ -84,6 +84,7 @@ class PostulacionDatosPersonalesTest extends TestCase
             ->assertJsonPath('data.completo', true)
             ->assertJsonPath('data.es_menor', false)
             ->assertJsonPath('data.datos.nombres', 'Camilo Andrés')
+            ->assertJsonPath('data.datos.sexo.codigo', 'hombre')
             ->assertJsonPath('data.datos.tipo_documento_identidad.codigo', 'cc')
             ->assertJsonPath('data.datos.representante_nombre', null);
 
@@ -355,6 +356,54 @@ class PostulacionDatosPersonalesTest extends TestCase
             ->assertStatus(422)->assertJsonValidationErrors('representante_municipio');
 
         $this->guardar($aspirante, $postulacion, $base)->assertOk();
+    }
+
+    /** Datos de un menor guardados ANTES de que existieran los campos nuevos del representante (sin tipo, correo ni declaración). */
+    private function datosDeMenorSinTerminar(Postulacion $postulacion): void
+    {
+        $this->conDatosPersonales($postulacion, [
+            'fecha_nacimiento' => now('America/Bogota')->subYears(17)->toDateString(),
+            'representante_nombre' => 'Marta Pérez',
+            'representante_documento' => '52123456',
+            'representante_telefono' => '3109876543',
+            'representante_parentesco' => 'Madre',
+        ]);
+    }
+
+    public function test_un_menor_con_el_representante_incompleto_no_puede_enviar(): void
+    {
+        [$aspirante, $postulacion] = $this->borrador(['hoja_de_vida' => false]);
+        $this->datosDeMenorSinTerminar($postulacion);
+
+        $this->actingAs($aspirante)->postJson("/api/postulaciones/{$postulacion->id}/enviar")
+            ->assertStatus(422)
+            ->assertJsonPath('errors.datos_personales.0', 'Completa los datos de tu representante legal y confirma que conoce tu postulación antes de enviarla.');
+
+        $this->assertSame('borrador', $postulacion->fresh()->estado->codigo);
+    }
+
+    public function test_volver_a_postularse_tambien_exige_los_datos_personales_completos(): void
+    {
+        [$aspirante, $postulacion] = $this->borrador(['hoja_de_vida' => false]);
+        $postulacion->update(['estado_id' => $this->parametroId('estado_postulacion', 'retirada')]);
+        $reactivar = fn () => $this->actingAs($aspirante)->patchJson("/api/postulaciones/{$postulacion->id}/estado", ['estado' => 'postulada']);
+
+        // Sin datos personales.
+        $reactivar()->assertStatus(422)->assertJsonPath('errors.datos_personales.0', 'Debes llenar tus datos personales antes de enviar la postulación.');
+
+        // Datos de un menor sin terminar.
+        $this->datosDeMenorSinTerminar($postulacion);
+        $reactivar()->assertStatus(422)
+            ->assertJsonPath('errors.datos_personales.0', 'Completa los datos de tu representante legal y confirma que conoce tu postulación antes de enviarla.');
+        $this->assertSame('retirada', $postulacion->fresh()->estado->codigo);
+
+        // Completados desde el formulario, ya puede volver a postularse.
+        $this->guardar($aspirante, $postulacion, $this->cuerpo([
+            'fecha_nacimiento' => now('America/Bogota')->subYears(17)->toDateString(),
+            'acepta_tratamiento_datos' => true,
+        ] + $this->representante()))->assertOk();
+        $reactivar()->assertOk();
+        $this->assertSame('postulada', $postulacion->fresh()->estado->codigo);
     }
 
     public function test_quien_revisa_lee_los_datos_con_alcance_por_ficha_y_sin_borradores(): void

@@ -26,6 +26,7 @@ trait DatosPersonalesAyudas
 
         PostulacionDatosPersonales::create($cambios + [
             'postulacion_id' => $postulacion->id,
+            'sexo_id' => Parametro::porTemaYCodigo('sexo', 'hombre')->id,
             'tipo_documento_identidad_id' => Parametro::porTemaYCodigo('tipo_documento_identidad', 'cc')->id,
             'numero_documento' => '1012345678',
             'nombres' => 'Aspirante',

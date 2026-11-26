@@ -24,7 +24,7 @@ class PostulacionDocumentoCorreccionTest extends TestCase
             'fecha_cierre' => now('America/Bogota')->subDay()->toDateString(),
             'fecha_evaluacion' => now('America/Bogota')->subDay()->toDateString(),
         ]), ['hoja_de_vida' => true]);
-        $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $postulacion = $this->crearPostulacion($convocatoria, $aspirante, ['estado_id' => $this->parametroId('estado_postulacion', 'postulada')]);
 
         Evaluacion::create([
             'postulacion_id' => $postulacion->id,
@@ -59,7 +59,7 @@ class PostulacionDocumentoCorreccionTest extends TestCase
             'fecha_cierre' => now('America/Bogota')->subDay()->toDateString(),
             'fecha_evaluacion' => now('America/Bogota')->subDay()->toDateString(),
         ]), ['hoja_de_vida' => true]);
-        $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $postulacion = $this->crearPostulacion($convocatoria, $aspirante, ['estado_id' => $this->parametroId('estado_postulacion', 'postulada')]);
 
         $url = "/api/postulaciones/{$postulacion->id}/documentos";
 
@@ -101,7 +101,7 @@ class PostulacionDocumentoCorreccionTest extends TestCase
             'fecha_cierre' => now('America/Bogota')->subDay()->toDateString(),
             'fecha_evaluacion' => now('America/Bogota')->subDay()->toDateString(),
         ]), ['hoja_de_vida' => true, 'documento_identidad' => true]);
-        $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $postulacion = $this->crearPostulacion($convocatoria, $aspirante, ['estado_id' => $this->parametroId('estado_postulacion', 'postulada')]);
 
         $hoja = $this->parametroId('tipo_documento', 'hoja_de_vida');
         Evaluacion::create([
@@ -138,7 +138,7 @@ class PostulacionDocumentoCorreccionTest extends TestCase
             'fecha_cierre' => now('America/Bogota')->subDay()->toDateString(),
             'fecha_evaluacion' => now('America/Bogota')->subDay()->toDateString(),
         ]), ['hoja_de_vida' => true, 'documento_identidad' => false]);
-        $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $postulacion = $this->crearPostulacion($convocatoria, $aspirante, ['estado_id' => $this->parametroId('estado_postulacion', 'postulada')]);
 
         $hoja = $this->parametroId('tipo_documento', 'hoja_de_vida');
         Evaluacion::create([

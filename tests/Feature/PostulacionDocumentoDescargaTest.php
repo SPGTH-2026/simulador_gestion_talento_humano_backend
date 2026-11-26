@@ -64,6 +64,7 @@ class PostulacionDocumentoDescargaTest extends TestCase
             ])->assertCreated();
 
         $documento = PostulacionDocumento::sole();
+        $this->enviada($postulacion);
         $instructor = $this->instructor($aspirante->ficha);
 
         $enLinea = $this->actingAs($instructor)

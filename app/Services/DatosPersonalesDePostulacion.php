@@ -20,7 +20,7 @@ class DatosPersonalesDePostulacion
 {
     /** Relaciones que se cargan para presentar los datos (catálogos y ubicaciones, del aspirante y de su representante). */
     private const RELACIONES = [
-        'tipoDocumentoIdentidad', 'nivelFormacion', 'departamento', 'municipio',
+        'sexo', 'tipoDocumentoIdentidad', 'nivelFormacion', 'departamento', 'municipio',
         'representanteTipoDocumento', 'representanteDepartamento', 'representanteMunicipio',
     ];
 
@@ -39,6 +39,7 @@ class DatosPersonalesDePostulacion
         $registro = PostulacionDatosPersonales::firstOrNew(['postulacion_id' => $postulacion->id]);
 
         $registro->fill([
+            'sexo_id' => $sexoId,
             'tipo_documento_identidad_id' => $tipoId,
             'nivel_formacion_id' => $nivelId,
             'numero_documento' => strtoupper($datos['numero_documento']),
@@ -118,6 +119,7 @@ class DatosPersonalesDePostulacion
             'es_menor' => $datos?->esMenor() ?? false,
             'edad_minima' => PostulacionDatosPersonales::EDAD_MINIMA,
             'datos' => $datos ? [
+                'sexo' => $this->parametro($datos->sexo),
                 'tipo_documento_identidad' => $this->parametro($datos->tipoDocumentoIdentidad),
                 'numero_documento' => $datos->numero_documento,
                 'nombres' => $datos->nombres,

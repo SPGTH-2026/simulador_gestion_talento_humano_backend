@@ -158,6 +158,8 @@ class DocumentosSoloLecturaPermisosTest extends TestCase
     public function test_el_instructor_no_puede_editar_skills_ni_estado_de_la_postulacion_del_aspirante(): void
     {
         [, $postulacion, $instructor] = $this->base();
+        // Una postulación enviada: es la que el instructor intenta cambiar sin éxito.
+        $postulacion->update(['estado_id' => $this->parametroId('estado_postulacion', 'postulada')]);
 
         $this->assertRechazada($this->actingAs($instructor)
             ->withHeaders(['Accept' => 'application/json'])

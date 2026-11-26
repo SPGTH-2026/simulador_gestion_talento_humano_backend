@@ -105,7 +105,8 @@ trait DocumentosSoloLecturaAyudas
         $aspirante = $this->aspirante($ficha);
         $convocatoria = $this->convocatoriaAbierta($ficha, $instructor);
         $convocatoria->documentos()->attach($this->parametroId('tipo_documento', 'hoja_de_vida'), ['obligatorio' => true]);
-        $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        // Nace en borrador: es cuando el aspirante sube sus documentos. subirComoAspirante() la deja enviada.
+        $postulacion = $this->crearPostulacion($convocatoria, $aspirante, 'borrador');
 
         return [$aspirante, $postulacion, $instructor];
     }
@@ -120,6 +121,9 @@ trait DocumentosSoloLecturaAyudas
                 'archivo' => $this->pdf('hoja.pdf'),
             ])
             ->assertCreated();
+
+        // Subido el documento, la postulación se envía: desde ahí ya no se edita y quien revisa la ve.
+        $postulacion->update(['estado_id' => $this->parametroId('estado_postulacion', 'postulada')]);
 
         return PostulacionDocumento::sole();
     }

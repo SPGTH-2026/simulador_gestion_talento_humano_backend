@@ -100,12 +100,22 @@ trait PostulacionDocumentoAyudas
         return $convocatoria->fresh();
     }
 
+    /**
+     * Por defecto la postulación nace en BORRADOR: es el estado en el que se suben documentos y habilidades (una postulación
+     * enviada ya no se edita). Las pruebas que necesitan otro estado lo piden en `$overrides`.
+     */
+    /** La postulación pasa a ENVIADA: ya no se edita y los revisores la ven (un borrador no es un postulante). */
+    private function enviada(Postulacion $postulacion): void
+    {
+        $postulacion->update(['estado_id' => $this->parametroId('estado_postulacion', 'postulada')]);
+    }
+
     private function crearPostulacion(Convocatoria $convocatoria, User $usuario, array $overrides = []): Postulacion
     {
         return Postulacion::create($overrides + [
             'convocatoria_id' => $convocatoria->id,
             'user_id' => $usuario->id,
-            'estado_id' => $this->parametroId('estado_postulacion', 'postulada'),
+            'estado_id' => $this->parametroId('estado_postulacion', 'borrador'),
             'fecha_postulacion' => now(),
         ]);
     }
@@ -117,10 +127,15 @@ trait PostulacionDocumentoAyudas
 
     // ── Estado (dueño) ─────────────────────────────────────────────────
 
-    /** @return array<string, array{string}> */
+    /**
+     * Estados en los que el dueño puede editar: borrador y retirada. Una postulación enviada ya no se edita (para cambiar algo
+     * hay que retirarla); la única excepción es una corrección vigente, que se prueba aparte.
+     *
+     * @return array<string, array{string}>
+     */
     public static function estadosEditables(): array
     {
-        return ['borrador' => ['borrador'], 'postulada' => ['postulada'], 'retirada' => ['retirada']];
+        return ['borrador' => ['borrador'], 'retirada' => ['retirada']];
     }
 
     /**

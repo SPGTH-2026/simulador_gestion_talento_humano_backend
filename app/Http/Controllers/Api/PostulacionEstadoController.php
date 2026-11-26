@@ -102,6 +102,7 @@ class PostulacionEstadoController extends Controller
             // Volver a postularme: misma ventana que el envío y obligatorios
             // completos. Si faltan, la postulación SIGUE retirada (no se toca).
             $this->exigirVentanaAbierta($postulacion->convocatoria, 'estado');
+            $this->exigirDatosPersonalesCompletos($postulacion);
 
             $faltantes = $documentos->faltantes($postulacion);
 
@@ -166,6 +167,26 @@ class PostulacionEstadoController extends Controller
      *    hay sexo con libreta pedida, el motivo para indicarlo).
      *  - UPDATE condicionado por estado: si otra petición se adelantó -> 422.
      */
+    /**
+     * Para enviar o volver a postularse: los datos personales deben existir, estar autorizados y, si la persona es menor de
+     * edad, incluir los datos de su representante legal. Una sola regla para las dos vías (enviar y reactivar).
+     */
+    private function exigirDatosPersonalesCompletos(Postulacion $postulacion): void
+    {
+        $datos = $postulacion->datosPersonales()->first();
+
+        $mensaje = match (true) {
+            $datos === null => 'Debes llenar tus datos personales antes de enviar la postulación.',
+            $datos->acepta_tratamiento_datos_at === null => 'Debes autorizar el tratamiento de tus datos personales antes de enviar la postulación.',
+            ! $datos->representanteCompleto() => 'Completa los datos de tu representante legal y confirma que conoce tu postulación antes de enviarla.',
+            default => null,
+        };
+
+        if ($mensaje !== null) {
+            throw ValidationException::withMessages(['datos_personales' => $mensaje]);
+        }
+    }
+
     public function enviar(
         Request $request,
         Postulacion $postulacion,
@@ -187,17 +208,7 @@ class PostulacionEstadoController extends Controller
         }
 
         // 4) Datos personales: sin ellos no se sabe si es menor ni si la libreta aplica.
-        $datosPersonales = $postulacion->datosPersonales()->first();
-        if (! $datosPersonales) {
-            throw ValidationException::withMessages([
-                'datos_personales' => 'Debes llenar tus datos personales antes de enviar la postulación.',
-            ]);
-        }
-        if ($datosPersonales->acepta_tratamiento_datos_at === null) {
-            throw ValidationException::withMessages([
-                'datos_personales' => 'Debes autorizar el tratamiento de tus datos personales antes de enviar la postulación.',
-            ]);
-        }
+        $this->exigirDatosPersonalesCompletos($postulacion);
 
         // 4b) Documentos obligatorios: subidos o no_aplica (libreta de mujer o de menor).
         $faltantes = $documentos->faltantes($postulacion);

@@ -19,7 +19,7 @@ class PostulacionDatosPersonales extends Model
     public const MAYORIA_DE_EDAD = 18;
 
     protected $fillable = [
-        'postulacion_id', 'tipo_documento_identidad_id', 'numero_documento', 'nombres', 'apellidos', 'fecha_nacimiento',
+        'postulacion_id', 'sexo_id', 'tipo_documento_identidad_id', 'numero_documento', 'nombres', 'apellidos', 'fecha_nacimiento',
         'telefono', 'departamento_codigo', 'municipio_codigo', 'direccion', 'nivel_formacion_id', 'representante_nombre',
         'representante_documento', 'representante_tipo_documento_id', 'representante_telefono', 'representante_correo',
         'representante_telefono_alterno', 'representante_departamento_codigo', 'representante_municipio_codigo',
@@ -38,6 +38,11 @@ class PostulacionDatosPersonales extends Model
     public function postulacion(): BelongsTo
     {
         return $this->belongsTo(Postulacion::class);
+    }
+
+    public function sexo(): BelongsTo
+    {
+        return $this->belongsTo(Parametro::class, 'sexo_id');
     }
 
     public function tipoDocumentoIdentidad(): BelongsTo
@@ -73,6 +78,23 @@ class PostulacionDatosPersonales extends Model
     public function nivelFormacion(): BelongsTo
     {
         return $this->belongsTo(Parametro::class, 'nivel_formacion_id');
+    }
+
+    /**
+     * ¿Están completos los datos del representante legal? Solo importan si la persona es menor de edad: nombre, tipo y número
+     * de documento, teléfono, correo, parentesco y la declaración de que conoce la postulación. (La residencia y el teléfono
+     * alterno son opcionales.)
+     */
+    public function representanteCompleto(): bool
+    {
+        if (! $this->esMenor()) {
+            return true;
+        }
+
+        return $this->representante_conoce
+            && filled($this->representante_nombre) && filled($this->representante_tipo_documento_id)
+            && filled($this->representante_documento) && filled($this->representante_telefono)
+            && filled($this->representante_correo) && filled($this->representante_parentesco);
     }
 
     /** ¿Es menor de 18 años? (entre 16 y 17: pide representante legal y no aplica la libreta militar). */
