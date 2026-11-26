@@ -134,6 +134,7 @@ class PostulacionController extends Controller
                     ->update([
                         'estado_id' => $this->parametroId('estado_postulacion', PostulacionEstado::Borrador->value),
                         'fecha_retiro' => null,
+                        'descartada_at' => null,
                     ]);
 
                 if ($afectadas === 0) {

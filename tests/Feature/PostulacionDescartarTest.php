@@ -108,6 +108,18 @@ class PostulacionDescartarTest extends TestCase
         $this->assertNull($postulacion->fresh()->descartada_at);
     }
 
+    public function test_si_la_convocatoria_vuelve_a_abrirse_una_descartada_reabre_y_reaparece_en_la_lista(): void
+    {
+        [$aspirante, $postulacion] = $this->escenario('retirada', convocatoriaCerrada: true);
+        $this->actingAs($aspirante)->postJson("/api/postulaciones/{$postulacion->id}/descartar")->assertNoContent();
+
+        $postulacion->convocatoria->update(['fecha_cierre' => now('America/Bogota')->addDays(5)->toDateString()]);
+        $this->actingAs($aspirante)->postJson("/api/convocatorias/{$postulacion->convocatoria_id}/postulaciones")->assertSuccessful();
+
+        $this->assertNull($postulacion->fresh()->descartada_at);
+        $this->assertContains($postulacion->id, $this->idsDeMiLista($aspirante));
+    }
+
     public function test_las_demas_postulaciones_de_la_lista_no_se_ven_afectadas(): void
     {
         [$aspirante, $descartada] = $this->escenario('retirada', convocatoriaCerrada: true);
