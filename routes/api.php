@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AlmacenamientoController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CalificacionSeleccionController;
 use App\Http\Controllers\Api\ComparacionSeleccionController;
@@ -139,6 +140,16 @@ Route::middleware(['auth:sanctum', 'verified', 'ficha'])->group(function () {
         ->whereNumber('postulacion')
         ->missing(fn () => abort(404, 'Postulación no encontrada.'))
         ->middleware('can:propio:postulaciones');
+
+    // ── Almacenamiento: uso (base y R2 por ficha) y documentos por ficha ──
+    // Solo super admin e instructor. El alcance por ficha lo aplica el controlador.
+    Route::middleware('can:almacenamiento:ver')->prefix('almacenamiento')->group(function () {
+        Route::get('resumen', [AlmacenamientoController::class, 'resumen']);
+        Route::get('fichas/{ficha}/documentos', [AlmacenamientoController::class, 'documentos'])->whereNumber('ficha');
+    });
+    Route::middleware('can:almacenamiento:gestionar')->prefix('almacenamiento')->group(function () {
+        Route::post('documentos/borrar', [AlmacenamientoController::class, 'borrar']);
+    });
 
     // ── Notificaciones (campana) ─────────────────────────────────────────
     // Cada usuario ve solo las suyas: el controlador filtra por el autenticado.

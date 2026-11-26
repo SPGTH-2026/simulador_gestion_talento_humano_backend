@@ -9,6 +9,9 @@ return [
         'evaluacion:ver', 'evaluacion:evaluar',
         'seleccion:ver', 'seleccion:decidir',
         'reportes:ver', 'usuarios:gestionar',
+        // Almacenamiento: uso de la base y de los documentos por ficha, y borrado de documentos. Solo super admin e
+        // instructor (y el instructor solo ve y borra en sus fichas: ver AlmacenamientoController).
+        'almacenamiento:ver', 'almacenamiento:gestionar',
         'propio:postulaciones', 'propio:documentos', 'propio:evaluaciones', 'propio:notificaciones',
     ],
 
@@ -28,6 +31,8 @@ return [
             'documentos:ver',
             'evaluacion:ver', 'evaluacion:evaluar', 'seleccion:ver', 'seleccion:decidir', 'reportes:ver',
             'propio:evaluaciones', 'propio:notificaciones',
+            // Solo lectura: ve el almacenamiento de su ficha, sin borrar (no tiene almacenamiento:gestionar).
+            'almacenamiento:ver',
         ],
         'evaluador' => [
             'dashboard:ver', 'documentos:ver', 'evaluacion:ver', 'evaluacion:evaluar', 'reportes:ver',
