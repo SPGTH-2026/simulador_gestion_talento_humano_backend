@@ -19,11 +19,16 @@ return new class extends Migration
                 ->constrained('parametros', 'id', 'pdp_sexo_fk')->restrictOnDelete();
         });
 
+        // Subconsulta correlacionada: sintaxis estándar que aceptan MySQL (local) y PostgreSQL (producción).
+        // «UPDATE ... JOIN» es solo de MySQL y en producción fallaba.
         DB::statement(
             'UPDATE postulacion_datos_personales d
-             JOIN postulaciones p ON p.id = d.postulacion_id
-             JOIN perfiles_aspirante pa ON pa.user_id = p.user_id
-             SET d.sexo_id = pa.sexo_id
+             SET sexo_id = (
+                 SELECT pa.sexo_id
+                 FROM postulaciones p
+                 JOIN perfiles_aspirante pa ON pa.user_id = p.user_id
+                 WHERE p.id = d.postulacion_id
+             )
              WHERE d.sexo_id IS NULL',
         );
     }
