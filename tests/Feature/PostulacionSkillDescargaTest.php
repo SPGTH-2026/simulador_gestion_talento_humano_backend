@@ -50,6 +50,7 @@ class PostulacionSkillDescargaTest extends TestCase
                 'archivo' => $this->pdf('excel.pdf'),
             ])->assertOk();
 
+        $this->enviada($postulacion);
         $instructor = $this->instructor($aspirante->ficha);
 
         $this->actingAs($instructor)
@@ -106,6 +107,7 @@ class PostulacionSkillDescargaTest extends TestCase
                 'archivo' => $this->pdf('excel.pdf'),
             ])->assertOk();
 
+        $this->enviada($postulacion);
         $instructor = $this->instructor($aspirante->ficha);
 
         $enLinea = $this->actingAs($instructor)
@@ -166,6 +168,8 @@ class PostulacionSkillDescargaTest extends TestCase
     {
         [$aspirante, $postulacion] = $this->base();
 
+        // El dueño sube y el revisor lee en el mismo recorrido: una postulación retirada es editable y la ven los revisores.
+        $postulacion->update(['estado_id' => $this->parametroId('estado_postulacion', 'retirada')]);
         $delCatalogo = PostulacionSkill::create([
             'postulacion_id' => $postulacion->id,
             'convocatoria_skill_id' => null,

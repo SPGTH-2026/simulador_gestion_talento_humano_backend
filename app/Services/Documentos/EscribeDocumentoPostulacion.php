@@ -221,13 +221,19 @@ final class EscribeDocumentoPostulacion
 
         if (! $perfil) {
             throw ValidationException::withMessages([
-                'codigo' => 'Antes de subir la libreta militar debes indicar tu sexo.',
+                'codigo' => 'Antes de subir la libreta militar debes llenar tus datos personales.',
             ]);
         }
 
         if ($perfil->sexo?->codigo === 'mujer') {
             throw ValidationException::withMessages([
                 'codigo' => 'La libreta militar no aplica: tu perfil está registrado como femenino.',
+            ]);
+        }
+
+        if (ReglaLibreta::noAplica($perfil, $postulacion->datosPersonales)) {
+            throw ValidationException::withMessages([
+                'codigo' => 'La libreta militar no aplica: eres menor de edad.',
             ]);
         }
     }

@@ -6,6 +6,7 @@ use App\Models\Convocatoria;
 use App\Models\Parametro;
 use App\Models\PerfilAspirante;
 use App\Models\Postulacion;
+use App\Services\Documentos\ReglaLibreta;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 
@@ -21,7 +22,7 @@ class DocumentosDePostulacion
 {
     /** Motivo que acompaña a la libreta cuando el aspirante no ha registrado sexo. */
     public const MOTIVO_FALTA_SEXO =
-        'Indica tu sexo para saber si aplica la libreta militar.';
+        'Llena tus datos personales para saber si aplica la libreta militar.';
 
     /**
      * Faltantes que impiden enviar: documentos OBLIGATORIOS de la convocatoria
@@ -33,7 +34,7 @@ class DocumentosDePostulacion
      */
     public function faltantes(Postulacion $postulacion): array
     {
-        $postulacion->loadMissing(['convocatoria.documentos', 'documentos']);
+        $postulacion->loadMissing(['convocatoria.documentos', 'documentos', 'datosPersonales']);
 
         $perfil = PerfilAspirante::query()
             ->where('user_id', $postulacion->user_id)
@@ -55,7 +56,7 @@ class DocumentosDePostulacion
             return [];
         }
 
-        $postulaciones->loadMissing(['convocatoria.documentos', 'documentos']);
+        $postulaciones->loadMissing(['convocatoria.documentos', 'documentos', 'datosPersonales']);
 
         $perfiles = PerfilAspirante::query()
             ->whereIn('user_id', $postulaciones->pluck('user_id')->unique()->all())
@@ -74,20 +75,36 @@ class DocumentosDePostulacion
     /**
      * Mismo cálculo y MISMA regla que completosPara (faltantesCon), para las postulaciones de UNA convocatoria ya
      * cargada: es lo que usa el Ranking para exigir los obligatorios aplicables. Siempre las mismas consultas, sin
-     * importar cuántas postulaciones haya: los archivos subidos de todas, los documentos de la convocatoria (una vez) y,
-     * solo si la convocatoria exige la libreta militar, los perfiles para saber a quién no le aplica.
+     * importar cuántas postulaciones haya.
      *
      * @param  EloquentCollection<int, Postulacion>  $postulaciones  postulaciones de $convocatoria
      * @return array<int, bool> mapa id de postulación => completo
      */
     public function completosDeConvocatoria(Convocatoria $convocatoria, EloquentCollection $postulaciones): array
     {
+        return array_map(
+            fn (array $faltantes) => $faltantes === [],
+            $this->faltantesDeConvocatoria($convocatoria, $postulaciones),
+        );
+    }
+
+    /**
+     * Los obligatorios que faltan de cada postulación de UNA convocatoria, con la misma regla de faltantesCon y en un
+     * número fijo de consultas: los archivos subidos de todas (solo ids), los documentos de la convocatoria (una vez) y,
+     * solo si la convocatoria exige la libreta militar, los perfiles para saber a quién no le aplica. Solo viajan el
+     * código y el nombre del documento del catálogo: nunca archivos ni rutas.
+     *
+     * @param  EloquentCollection<int, Postulacion>  $postulaciones  postulaciones de $convocatoria
+     * @return array<int, array<int, array{codigo: string, nombre: string, motivo?: string}>> id de postulación => faltantes
+     */
+    public function faltantesDeConvocatoria(Convocatoria $convocatoria, EloquentCollection $postulaciones): array
+    {
         if ($postulaciones->isEmpty()) {
             return [];
         }
 
         $convocatoria->loadMissing('documentos');
-        $postulaciones->load(['documentos' => fn ($q) => $q->select('id', 'postulacion_id', 'parametro_id')]);
+        $postulaciones->load(['documentos' => fn ($q) => $q->select('id', 'postulacion_id', 'parametro_id'), 'datosPersonales']);
 
         $exigeLibreta = $convocatoria->documentos->contains(
             fn (Parametro $d) => $d->codigo === Parametro::DOC_LIBRETA_MILITAR && (bool) $d->pivot->obligatorio,
@@ -103,7 +120,7 @@ class DocumentosDePostulacion
         $resultado = [];
         foreach ($postulaciones as $postulacion) {
             $postulacion->setRelation('convocatoria', $convocatoria);
-            $resultado[$postulacion->id] = $this->faltantesCon($postulacion, $perfiles->get($postulacion->user_id)) === [];
+            $resultado[$postulacion->id] = $this->faltantesCon($postulacion, $perfiles->get($postulacion->user_id));
         }
 
         return $resultado;
@@ -116,7 +133,7 @@ class DocumentosDePostulacion
      */
     private function faltantesCon(Postulacion $postulacion, ?PerfilAspirante $perfil): array
     {
-        $sexoMujer = $perfil?->sexo?->codigo === 'mujer';
+        $libretaNoAplica = ReglaLibreta::noAplica($perfil, $postulacion->datosPersonales);
 
         $subidos = $postulacion->documentos
             ->whereNotNull('parametro_id')
@@ -129,8 +146,8 @@ class DocumentosDePostulacion
                 continue;
             }
 
-            // La libreta de una mujer no se exige: no es un faltante.
-            if ($parametro->codigo === Parametro::DOC_LIBRETA_MILITAR && $sexoMujer) {
+            // La libreta no se exige a mujeres ni a menores de 18: no es un faltante.
+            if ($parametro->codigo === Parametro::DOC_LIBRETA_MILITAR && $libretaNoAplica) {
                 continue;
             }
 
@@ -153,6 +170,7 @@ class DocumentosDePostulacion
 
         return $faltantes;
     }
+
 
     /** ¿Están todos los obligatorios subidos o en 'no_aplica'? */
     public function completo(Postulacion $postulacion): bool

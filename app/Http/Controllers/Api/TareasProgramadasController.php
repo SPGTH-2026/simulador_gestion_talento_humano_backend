@@ -25,6 +25,7 @@ class TareasProgramadasController extends Controller
     private const TAREAS = [
         'cerrar-vencidas' => 'convocatorias:cerrar-vencidas',
         'resumen-diario' => 'notificaciones:resumen-diario',
+        'depurar-notificaciones' => 'notificaciones:depurar',
     ];
 
     public function ejecutar(Request $request, string $tarea): JsonResponse

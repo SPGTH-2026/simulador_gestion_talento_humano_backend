@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Postulacion extends Model
 {
@@ -25,6 +26,7 @@ class Postulacion extends Model
         return [
             'fecha_postulacion' => 'datetime',
             'fecha_retiro' => 'datetime',
+            'descartada_at' => 'datetime',
         ];
     }
 
@@ -48,6 +50,12 @@ class Postulacion extends Model
     public function documentos(): HasMany
     {
         return $this->hasMany(PostulacionDocumento::class);
+    }
+
+    /** Datos personales declarados en esta postulación (null mientras no los haya llenado). */
+    public function datosPersonales(): HasOne
+    {
+        return $this->hasOne(PostulacionDatosPersonales::class);
     }
 
     /** Skills declaradas por el aspirante en esta postulación. */

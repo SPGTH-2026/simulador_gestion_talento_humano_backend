@@ -108,7 +108,7 @@ class ReferenciaDocumentalController extends Controller
         $actor = $request->user();
 
         // seleccion:decidir lo tienen también aprendices; aquí solo decide Instructor o Superadministrador.
-        abort_unless(in_array($actor->role, [Role::Instructor, Role::SuperAdmin], true), 403);
+        abort_unless($this->veDetalleDeReferencia($actor), 403);
 
         $this->convocatoriaEnAlcance($actor, $convocatoria);
 

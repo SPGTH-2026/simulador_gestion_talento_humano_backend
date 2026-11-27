@@ -56,7 +56,8 @@ class SeleccionCandidatosTest extends TestCase
         $datos = $this->candidatos($seleccionador, $convocatoria)->assertOk()->json('data');
 
         $this->assertCount(1, $datos);
-        $this->assertSame(['id', 'aspirante', 'estado_documental', 'cumplimiento'], array_keys($datos[0]));
+        // Contrato aditivo: los campos de siempre, en su orden, y después listo y bloqueos.
+        $this->assertSame(['id', 'aspirante', 'estado_documental', 'cumplimiento', 'listo', 'bloqueos'], array_keys($datos[0]));
         $this->assertSame($enviada->id, $datos[0]['id']);
         $this->assertSame('Ana Pérez', $datos[0]['aspirante']);
     }

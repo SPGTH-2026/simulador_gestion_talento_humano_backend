@@ -27,6 +27,7 @@ use Illuminate\Support\Collection;
  * | Convocatoria publicada       | sí (toda la ficha) | no            | no        | no                      | no            |
  * | Recepción cerrada (en proceso) | sí (todos; a cada uno se le dice si pasa a evaluación) | no | no | no | no |
  * | Convocatoria cerrada         | sí (solo postulados) | no          | no        | no                      | no            |
+ * | Convocatoria reabierta (plazo ampliado) | sí (solo con postulación enviada o retirada) | no | no | no | no |
  *
  * Los pendientes (por evaluar, por seleccionar, por cerrar, borradores, correcciones por vencer, cierre próximo) no
  * salen de un evento: ResumenPendientes los calcula cada día y avisa solo si hay algo pendiente.
@@ -225,6 +226,45 @@ final class Avisos
                 'Convocatoria cerrada',
                 "«{$nombre}» fue cerrada. Puedes consultar el resultado de tu evaluación en Mis evaluaciones.",
                 '/mis-evaluaciones',
+            );
+        }
+    }
+
+    /**
+     * Se amplió el plazo y la convocatoria (publicada) volvió a recibir postulaciones. Avisa solo a quien ya tiene una
+     * postulación: a quien la envió le confirma que sigue vigente; a quien la retiró le dice que puede reabrirla.
+     */
+    public function convocatoriaReabierta(Convocatoria $convocatoria): void
+    {
+        $nombre = $convocatoria->nombre;
+        $cierre = $convocatoria->fecha_cierre?->format('d/m/Y');
+        $hasta = $cierre ? " hasta el {$cierre}" : '';
+
+        $porEstado = fn (PostulacionEstado $estado) => Postulacion::query()
+            ->where('convocatoria_id', $convocatoria->id)
+            ->whereHas('estado', fn ($q) => $q->where('codigo', $estado->value))
+            ->with('user')
+            ->get()
+            ->pluck('user')
+            ->filter();
+
+        foreach ($porEstado(PostulacionEstado::Postulada) as $usuario) {
+            $this->notificador->enviar(
+                $usuario,
+                TipoNotificacion::ConvocatoriaReabierta,
+                'Convocatoria reabierta',
+                "«{$nombre}» volvió a recibir postulaciones{$hasta}. Tu postulación sigue enviada y vigente: no tienes que hacer nada.",
+                '/mis-postulaciones',
+            );
+        }
+
+        foreach ($porEstado(PostulacionEstado::Retirada) as $usuario) {
+            $this->notificador->enviar(
+                $usuario,
+                TipoNotificacion::ConvocatoriaReabierta,
+                'Convocatoria reabierta',
+                "«{$nombre}» volvió a recibir postulaciones{$hasta}. Retiraste tu postulación: si quieres, puedes volver a postularte.",
+                '/convocatorias',
             );
         }
     }

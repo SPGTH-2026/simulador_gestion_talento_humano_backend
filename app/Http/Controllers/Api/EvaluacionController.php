@@ -41,6 +41,7 @@ class EvaluacionController extends Controller
         $postulacion->load([
             'user:id,name,email,ficha_id',
             'user.perfilAspirante.sexo',
+            'datosPersonales',
             'convocatoria:id,nombre,cargo,estado_id,ficha_id,fecha_evaluacion,formacion,experiencia,competencias,conocimientos_especificos',
             'convocatoria.estado:id,codigo,nombre',
             'convocatoria.documentos',
@@ -264,6 +265,7 @@ class EvaluacionController extends Controller
         $postulacion->load([
             'user:id,name,email,ficha_id',
             'user.perfilAspirante.sexo',
+            'datosPersonales',
             'convocatoria:id,nombre,cargo,estado_id,ficha_id,fecha_evaluacion',
             'convocatoria.estado:id,codigo,nombre',
             'convocatoria.documentos',

@@ -1,31 +1,27 @@
 <?php
 
+use App\Http\Controllers\Api\AlmacenamientoController;
 use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\CalificacionSeleccionController;
-use App\Http\Controllers\Api\ComparacionSeleccionController;
-use App\Http\Controllers\Api\ConfiguracionSeleccionController;
+use App\Http\Controllers\Api\ContrasenaController;
 use App\Http\Controllers\Api\ConvocatoriaController;
 use App\Http\Controllers\Api\ListadoConvocatoriasController;
 use App\Http\Controllers\Api\TareasProgramadasController;
-use App\Http\Controllers\Api\DecisionSeleccionController;
 use App\Http\Controllers\Api\EvaluacionController;
 use App\Http\Controllers\Api\EvaluacionAspiranteController;
 use App\Http\Controllers\Api\EvaluacionCorreccionController;
 use App\Http\Controllers\Api\EvaluacionListadoController;
 use App\Http\Controllers\Api\FichaController;
-use App\Http\Controllers\Api\FinalistasSeleccionController;
 use App\Http\Controllers\Api\NotificacionController;
 use App\Http\Controllers\Api\ParametroController;
 use App\Http\Controllers\Api\PerfilAspiranteController;
 use App\Http\Controllers\Api\PortafolioController;
 use App\Http\Controllers\Api\PostulacionController;
 use App\Http\Controllers\Api\PostulacionEstadoController;
+use App\Http\Controllers\Api\PostulacionDatosPersonalesController;
 use App\Http\Controllers\Api\PostulacionDocumentoController;
 use App\Http\Controllers\Api\PostulacionSkillController;
-use App\Http\Controllers\Api\RankingSeleccionController;
-use App\Http\Controllers\Api\ReferenciaDocumentalController;
-use App\Http\Controllers\Api\SeleccionController;
 use App\Http\Controllers\Api\SocialAuthController;
+use App\Http\Controllers\Api\UbicacionController;
 use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
 
@@ -37,15 +33,15 @@ Route::prefix('auth')->group(function () {
     Route::post('forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:otp-send');
     Route::post('reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:otp-check');
 
-    // OAuth: el callback llega desde accounts.google.com, no desde el front.
-    // Sanctum statefulApi() solo da sesión si el request viene de un dominio
-    // stateful, así que aquí se fuerza 'web' para poder iniciar sesión.
-    Route::get('{provider}/redirect', [SocialAuthController::class, 'redirect'])->middleware('web');
-    Route::get('{provider}/callback', [SocialAuthController::class, 'callback'])->middleware('web');
+    // OAuth: el callback llega desde accounts.google.com, no desde el front, y Sanctum statefulApi() solo da sesión a las
+    // peticiones del front. 'sesion.web' abre la sesión web cuando Sanctum no lo hizo, y NUNCA dos veces: con 'web' a secas,
+    // una petición del front con cookie previa perdía la sesión (ver SesionWebUnaVez).
+    Route::get('{provider}/redirect', [SocialAuthController::class, 'redirect'])->middleware('sesion.web');
+    Route::get('{provider}/callback', [SocialAuthController::class, 'callback'])->middleware('sesion.web');
     // Aspirante que entró con Google y todavía no eligió su ficha: la cuenta se crea al elegirla.
-    Route::get('google/pendiente', [SocialAuthController::class, 'pendiente'])->middleware('web');
+    Route::get('google/pendiente', [SocialAuthController::class, 'pendiente'])->middleware('sesion.web');
     Route::post('google/pendiente/ficha', [SocialAuthController::class, 'completarPendiente'])
-        ->middleware(['web', 'throttle:login']);
+        ->middleware(['sesion.web', 'throttle:login']);
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('me', [AuthController::class, 'me']);
@@ -54,6 +50,13 @@ Route::prefix('auth')->group(function () {
         // Confirmar correo: requieren sesión pero NO 'verified' (si no, no se podría confirmar).
         Route::post('verification/send', [AuthController::class, 'sendVerification'])->middleware('throttle:otp-send');
         Route::post('verification/confirm', [AuthController::class, 'confirmVerification'])->middleware('throttle:otp-check');
+
+        // Establecer o cambiar la contraseña desde la sesión, con código al correo de ESA sesión. Exige correo verificado y los
+        // límites existentes (otp-send / otp-check). Apagado por defecto: ver config/seguridad.php.
+        Route::middleware('verified')->prefix('password')->group(function () {
+            Route::post('codigo', [ContrasenaController::class, 'codigo'])->middleware('throttle:otp-send');
+            Route::post('establecer', [ContrasenaController::class, 'establecer'])->middleware('throttle:otp-check');
+        });
 
         // El aspirante se asocia a su ficha (Google o registro por correo).
         // Exige correo verificado: es una acción de negocio, no de autenticación.
@@ -131,6 +134,12 @@ Route::middleware(['auth:sanctum', 'verified', 'ficha'])->group(function () {
         ->missing(fn () => abort(404, 'Postulación no encontrada.'))
         ->middleware('can:propio:postulaciones');
 
+    // Descartar una postulación retirada cuya convocatoria ya cerró: deja de aparecer en la lista de la persona.
+    Route::post('postulaciones/{postulacion}/descartar', [PostulacionEstadoController::class, 'descartar'])
+        ->whereNumber('postulacion')
+        ->missing(fn () => abort(404, 'Postulación no encontrada.'))
+        ->middleware('can:propio:postulaciones');
+
     // Envío del borrador: valida los documentos obligatorios y pasa a
     // 'postulada'. 'postulada' ya NO se alcanza con el PATCH anterior.
     Route::post('postulaciones/{postulacion}/enviar', [PostulacionEstadoController::class, 'enviar'])
@@ -138,12 +147,27 @@ Route::middleware(['auth:sanctum', 'verified', 'ficha'])->group(function () {
         ->missing(fn () => abort(404, 'Postulación no encontrada.'))
         ->middleware('can:propio:postulaciones');
 
+    // ── Almacenamiento: uso (base y R2 por ficha) y documentos por ficha ──
+    // Solo super admin e instructor. El alcance por ficha lo aplica el controlador.
+    Route::middleware('can:almacenamiento:ver')->prefix('almacenamiento')->group(function () {
+        Route::get('resumen', [AlmacenamientoController::class, 'resumen']);
+        Route::get('fichas/{ficha}/documentos', [AlmacenamientoController::class, 'documentos'])->whereNumber('ficha');
+    });
+    Route::middleware('can:almacenamiento:gestionar')->prefix('almacenamiento')->group(function () {
+        Route::get('fichas/{ficha}/documentos/ids', [AlmacenamientoController::class, 'idsBorrables'])->whereNumber('ficha');
+        Route::post('documentos/borrar', [AlmacenamientoController::class, 'borrar']);
+    });
+
     // ── Notificaciones (campana) ─────────────────────────────────────────
     // Cada usuario ve solo las suyas: el controlador filtra por el autenticado.
     Route::middleware('can:propio:notificaciones')->group(function () {
         Route::get('notificaciones', [NotificacionController::class, 'index']);
         Route::post('notificaciones/leer-todas', [NotificacionController::class, 'leerTodas']);
         Route::post('notificaciones/{notificacion}/leer', [NotificacionController::class, 'leer'])
+            ->whereNumber('notificacion');
+        Route::post('notificaciones/{notificacion}/ocultar', [NotificacionController::class, 'ocultar'])
+            ->whereNumber('notificacion');
+        Route::post('notificaciones/{notificacion}/restaurar', [NotificacionController::class, 'restaurar'])
             ->whereNumber('notificacion');
     });
 
@@ -154,10 +178,22 @@ Route::middleware(['auth:sanctum', 'verified', 'ficha'])->group(function () {
     // con la convocatoria publicada y dentro de la ventana, en 'borrador',
     // 'postulada' o 'retirada'.
     Route::middleware('can:propio:documentos')->group(function () {
-        // Perfil mínimo del aspirante (sexo), prellenado entre postulaciones.
-        // Elegir el sexo NO crea postulación: es del perfil del usuario.
+        // Perfil mínimo del aspirante (sexo). Se conserva por compatibilidad: el sexo ahora se pide dentro de los datos
+        // personales de cada postulación.
+        // Departamentos y municipios de Colombia (DIVIPOLA) para el formulario de datos personales.
+        Route::get('ubicaciones/departamentos', [UbicacionController::class, 'departamentos']);
+        Route::get('ubicaciones/departamentos/{departamento}/municipios', [UbicacionController::class, 'municipios'])
+            ->where('departamento', '[0-9]{2}');
+
         Route::get('perfil', [PerfilAspiranteController::class, 'show']);
         Route::put('perfil/sexo', [PerfilAspiranteController::class, 'sexo']);
+
+        Route::get('postulaciones/{postulacion}/datos-personales', [PostulacionDatosPersonalesController::class, 'show'])
+            ->whereNumber('postulacion')
+            ->missing(fn () => abort(404, 'Postulación no encontrada.'));
+        Route::put('postulaciones/{postulacion}/datos-personales', [PostulacionDatosPersonalesController::class, 'update'])
+            ->whereNumber('postulacion')
+            ->missing(fn () => abort(404, 'Postulación no encontrada.'));
 
         Route::get('postulaciones/{postulacion}/documentos', [PostulacionDocumentoController::class, 'show'])
             ->whereNumber('postulacion')
@@ -195,6 +231,9 @@ Route::middleware(['auth:sanctum', 'verified', 'ficha'])->group(function () {
     // Revisores (permiso 'documentos:ver'): solo LECTURA de postulaciones ajenas,
     // con alcance por ficha (fuera de su ficha -> 404, sin revelar existencia).
     Route::middleware('can:documentos:ver')->prefix('revision')->group(function () {
+        Route::get('postulaciones/{postulacion}/datos-personales', [PostulacionDatosPersonalesController::class, 'showRevision'])
+            ->whereNumber('postulacion')
+            ->missing(fn () => abort(404, 'Postulación no encontrada.'));
         Route::get('postulaciones/{postulacion}/documentos', [PostulacionDocumentoController::class, 'showRevision'])
             ->whereNumber('postulacion')
             ->missing(fn () => abort(404, 'Postulación no encontrada.'));
@@ -230,74 +269,11 @@ Route::middleware(['auth:sanctum', 'verified', 'ficha'])->group(function () {
         ->middleware('can:propio:postulaciones')
         ->whereNumber('postulacion');
 
-    // ── Módulo de Selección y Preselección (etapa 1, solo lectura) ─────
-    // Fuera del alcance de fichas del actor, la convocatoria responde 404.
-    Route::get('seleccion/convocatorias', [SeleccionController::class, 'convocatorias'])
-        ->middleware('can:seleccion:ver');
-    Route::get('seleccion/convocatorias/{convocatoria}/candidatos', [SeleccionController::class, 'candidatos'])
-        ->whereNumber('convocatoria')
-        ->missing(fn () => abort(404, 'Convocatoria no encontrada.'))
-        ->middleware('can:seleccion:ver');
+    // Módulo de Selección y Preselección: ver routes/seleccion.php (mismo grupo de autenticación; incluye las citaciones).
+    require __DIR__.'/seleccion.php';
 
-    // Etapa 3: configuración de entrevista y prueba técnica por convocatoria. La
-    // escritura sigue la matriz de Selección (seleccion:decidir), sin restringir el rol.
-    Route::get('seleccion/convocatorias/{convocatoria}/configuracion', [ConfiguracionSeleccionController::class, 'show'])
-        ->whereNumber('convocatoria')
-        ->middleware('can:seleccion:ver');
-    Route::put('seleccion/convocatorias/{convocatoria}/configuracion', [ConfiguracionSeleccionController::class, 'update'])
-        ->whereNumber('convocatoria')
-        ->middleware('can:seleccion:decidir');
-
-    // Etapa 2: evaluación documental de referencia. Decide solo Instructor o
-    // Superadministrador (el rol se exige en el controlador, además del permiso).
-    Route::get('seleccion/convocatorias/{convocatoria}/candidatos/{postulacion}/referencia-documental', [ReferenciaDocumentalController::class, 'show'])
-        ->whereNumber(['convocatoria', 'postulacion'])
-        ->middleware('can:seleccion:decidir');
-    Route::post('seleccion/convocatorias/{convocatoria}/candidatos/{postulacion}/referencia-documental', [ReferenciaDocumentalController::class, 'store'])
-        ->whereNumber(['convocatoria', 'postulacion'])
-        ->middleware('can:seleccion:decidir');
-
-    // Etapa 4: calificaciones presenciales. Consultar pide seleccion:ver; registrar o corregir,
-    // seleccion:decidir. Las reglas de estado y habilitación se validan en el controlador.
-    Route::get('seleccion/convocatorias/{convocatoria}/candidatos/{postulacion}/calificaciones', [CalificacionSeleccionController::class, 'show'])
-        ->whereNumber(['convocatoria', 'postulacion'])
-        ->middleware('can:seleccion:ver');
-    Route::put('seleccion/convocatorias/{convocatoria}/candidatos/{postulacion}/calificaciones/{actividad}', [CalificacionSeleccionController::class, 'update'])
-        ->whereNumber(['convocatoria', 'postulacion'])
-        ->whereIn('actividad', ['entrevista', 'prueba_tecnica'])
-        ->middleware('can:seleccion:decidir');
-
-    // Etapa 5: ranking de candidatos listos y finalistas. Consultar pide seleccion:ver;
-    // fijar el objetivo y confirmar la lista, seleccion:decidir.
-    Route::get('seleccion/convocatorias/{convocatoria}/ranking', [RankingSeleccionController::class, 'show'])
-        ->whereNumber('convocatoria')
-        ->middleware('can:seleccion:ver');
-    Route::put('seleccion/convocatorias/{convocatoria}/ranking/objetivo', [RankingSeleccionController::class, 'objetivo'])
-        ->whereNumber('convocatoria')
-        ->middleware('can:seleccion:decidir');
-    Route::get('seleccion/convocatorias/{convocatoria}/finalistas', [FinalistasSeleccionController::class, 'index'])
-        ->whereNumber('convocatoria')
-        ->middleware('can:seleccion:ver');
-    Route::post('seleccion/convocatorias/{convocatoria}/finalistas', [FinalistasSeleccionController::class, 'store'])
-        ->whereNumber('convocatoria')
-        ->middleware('can:seleccion:decidir');
-
-    // Etapa 6: decisiones internas, cupos e historial. Consultar pide seleccion:ver; decidir o rectificar, seleccion:decidir.
-    Route::get('seleccion/convocatorias/{convocatoria}/decisiones', [DecisionSeleccionController::class, 'index'])
-        ->whereNumber('convocatoria')
-        ->middleware('can:seleccion:ver');
-    Route::put('seleccion/convocatorias/{convocatoria}/decisiones/{postulacion}', [DecisionSeleccionController::class, 'update'])
-        ->whereNumber(['convocatoria', 'postulacion'])
-        ->middleware('can:seleccion:decidir');
-    Route::get('seleccion/convocatorias/{convocatoria}/decisiones/{postulacion}/historial', [DecisionSeleccionController::class, 'historial'])
-        ->whereNumber(['convocatoria', 'postulacion'])
-        ->middleware('can:seleccion:ver');
-
-    // CU-SEL-017: comparar de 2 a 5 candidatos de una convocatoria (solo lectura). Pide seleccion:ver; el evaluador y la
-    // referencia documental solo se envían a Instructor y Superadministrador.
-    Route::get('seleccion/convocatorias/{convocatoria}/comparacion', [ComparacionSeleccionController::class, 'show'])
-        ->whereNumber('convocatoria')
-        ->middleware('can:seleccion:ver');
+    // Textos legales y aceptaciones (apagado por defecto): ver routes/legal.php.
+    require __DIR__.'/legal.php';
 });
 
 // ── Ejemplo: cada ruta de negocio declara el permiso que exige (403 si el rol no lo tiene) ──

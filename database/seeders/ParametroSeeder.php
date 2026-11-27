@@ -104,6 +104,20 @@ class ParametroSeeder extends Seeder
                 ['codigo' => 'hombre', 'nombre' => 'Masculino', 'orden' => 1],
                 ['codigo' => 'mujer', 'nombre' => 'Femenino', 'orden' => 2],
             ]],
+            'tipo_documento_identidad' => ['nombre' => 'Tipo de documento de identidad', 'parametros' => [
+                ['codigo' => 'cc', 'nombre' => 'Cédula de ciudadanía', 'orden' => 1],
+                ['codigo' => 'ti', 'nombre' => 'Tarjeta de identidad', 'orden' => 2],
+                ['codigo' => 'ce', 'nombre' => 'Cédula de extranjería', 'orden' => 3],
+                ['codigo' => 'ppt', 'nombre' => 'Permiso por protección temporal', 'orden' => 4],
+                ['codigo' => 'pasaporte', 'nombre' => 'Pasaporte', 'orden' => 5],
+            ]],
+            'nivel_formacion' => ['nombre' => 'Nivel de formación', 'parametros' => [
+                ['codigo' => 'bachiller', 'nombre' => 'Bachiller', 'orden' => 1],
+                ['codigo' => 'tecnico', 'nombre' => 'Técnico', 'orden' => 2],
+                ['codigo' => 'tecnologo', 'nombre' => 'Tecnólogo', 'orden' => 3],
+                ['codigo' => 'profesional', 'nombre' => 'Profesional', 'orden' => 4],
+                ['codigo' => 'posgrado', 'nombre' => 'Posgrado', 'orden' => 5],
+            ]],
             'tipo_documento' => ['nombre' => 'Tipo de documento', 'parametros' => [
                 ['codigo' => 'documento_identidad', 'nombre' => 'Documento de identidad', 'orden' => 1],
                 ['codigo' => 'hoja_de_vida', 'nombre' => 'Hoja de vida', 'orden' => 2, 'es_sistema' => true],

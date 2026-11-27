@@ -19,6 +19,7 @@ class Notificacion extends Model
         return [
             'tipo' => TipoNotificacion::class,
             'leida_at' => 'datetime',
+            'ocultada_at' => 'datetime',
         ];
     }
 
@@ -31,6 +32,22 @@ class Notificacion extends Model
     public function scopeNoLeidas(Builder $query): void
     {
         $query->whereNull('leida_at');
+    }
+
+    /** Las que se ven en la lista normal y cuentan como pendientes: no ocultadas. */
+    public function scopeVisibles(Builder $query): void
+    {
+        $query->whereNull('ocultada_at');
+    }
+
+    public function scopeOcultas(Builder $query): void
+    {
+        $query->whereNotNull('ocultada_at');
+    }
+
+    public function estaOculta(): bool
+    {
+        return $this->ocultada_at !== null;
     }
 
     public function estaLeida(): bool

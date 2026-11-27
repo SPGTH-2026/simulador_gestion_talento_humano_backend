@@ -31,7 +31,9 @@ trait GestionaPostulacionPropia
      * - Borrador y Retirada: solo dentro de la ventana de recepción
      *   (apertura..cierre). Una retirada sigue siendo editable por su dueño y
      *   editar NO cambia el estado: sigue retirada hasta que la reactive.
-     * - Postulada: convocatoria publicada, después de apertura, y antes de fecha_evaluacion (si existe).
+     * - Postulada: NO editable. Enviada la postulación no se cambia nada (documentos, adicionales, habilidades ni datos): para
+     *   cambiar algo se retira y se vuelve a postular. La única excepción es una corrección vigente pedida por el evaluador, que
+     *   se resuelve aparte (correccionVigente) y solo deja reemplazar los documentos que marcó.
      * - Convocatoria no publicada: no editable (404 en exigirEditable, salvo
      *   retirada, que recibe 422 con el motivo).
      */
@@ -55,12 +57,8 @@ trait GestionaPostulacionPropia
             return $convocatoria->ventanaPostulacion() === VentanaPostulacion::Abierta;
         }
 
-        if ($codigo !== PostulacionEstado::Postulada->value) {
-            return false;
-        }
-
-        return $convocatoria->fecha_evaluacion === null
-            || $hoy < $convocatoria->fecha_evaluacion->toDateString();
+        // Postulada (o cualquier otro estado): no se edita.
+        return false;
     }
 
     /**
@@ -141,17 +139,11 @@ trait GestionaPostulacionPropia
             return '';
         }
 
-        if ($codigo !== PostulacionEstado::Postulada->value) {
-            return 'Esta postulación no está en estado editable.';
+        if ($codigo === PostulacionEstado::Postulada->value) {
+            return 'Tu postulación ya fue enviada. Para cambiar algo, retírala y vuelve a postularte.';
         }
 
-        if ($convocatoria->fecha_evaluacion && $hoy >= $convocatoria->fecha_evaluacion->toDateString()) {
-            return 'La evaluación ya comenzó el '
-                .$convocatoria->fecha_evaluacion->format('d/m/Y')
-                .'. Los documentos quedaron solo para consulta.';
-        }
-
-        return '';
+        return 'Esta postulación no está en estado editable.';
     }
 
     /**

@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\Role;
+use App\Enums\TipoNotificacion;
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\Notificaciones\Notificador;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -182,11 +184,9 @@ class UserController extends Controller
         if ($datos['role'] === Role::Aspirante->value && ! $fichaId) {
             throw ValidationException::withMessages(['ficha_id' => 'El aspirante debe quedar en una ficha']);
         }
-        // Un instructor debe tener al menos una ficha asignada.
+        // Un instructor puede quedar sin fichas: crea la suya desde Fichas (la ficha que registra queda a su nombre).
         $fichasInstructor = array_values(array_unique(array_map('intval', $datos['fichas'] ?? [])));
-        if ($datos['role'] === Role::Instructor->value && $fichasInstructor === []) {
-            throw ValidationException::withMessages(['fichas' => 'El instructor debe tener al menos una ficha']);
-        }
+        $eraInstructor = $user->role === Role::Instructor;
 
         $user->forceFill([
             'role' => $datos['role'],
@@ -200,6 +200,17 @@ class UserController extends Controller
             $user->fichas()->sync($fichasInstructor);
         } else {
             $user->fichas()->detach();
+        }
+
+        // Recién convertido en instructor y sin ninguna ficha: se le avisa que cree la suya para empezar.
+        if ($datos['role'] === Role::Instructor->value && ! $eraInstructor && $user->fichas()->doesntExist()) {
+            app(Notificador::class)->enviar(
+                $user,
+                TipoNotificacion::InstructorCrearFicha,
+                'Tu cuenta de instructor está activa',
+                'Crea tu ficha desde la sección Fichas para empezar a administrarla.',
+                '/fichas',
+            );
         }
 
         // Al cambiar rol/estado se invalidan las sesiones y tokens antiguos: si alguien

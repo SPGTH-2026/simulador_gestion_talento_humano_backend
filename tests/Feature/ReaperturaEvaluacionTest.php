@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Parametro;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Concerns\MientrasEditable;
 use Tests\Concerns\RondasCorreccionAyudas;
 use Tests\TestCase;
 
@@ -14,12 +15,15 @@ use Tests\TestCase;
 class ReaperturaEvaluacionTest extends TestCase
 {
     use RefreshDatabase;
+    use MientrasEditable;
     use RondasCorreccionAyudas;
 
     public function test_cambiar_un_documento_reabre_la_evaluacion_finalizada_y_el_evaluador_ve_el_motivo(): void
     {
         $this->postulacion->convocatoria->forceFill([
             'estado_id' => Parametro::porTemaYCodigo('estado_convocatoria', 'publicada')->id,
+            'fecha_apertura' => now('America/Bogota')->subDay()->toDateString(),
+            'fecha_cierre' => now('America/Bogota')->addDay()->toDateString(),
         ])->save();
 
         $this->actingAs($this->evaluador)->putJson("/api/evaluaciones/{$this->postulacion->id}", [
@@ -28,8 +32,8 @@ class ReaperturaEvaluacionTest extends TestCase
             'perfil' => ['doc-'.$this->hoja => true, 'doc-'.$this->identidad => true],
         ])->assertOk()->assertJsonPath('data.evaluacion.estado', 'finalizada');
 
-        // El aspirante reemplaza un documento requerido.
-        $this->responder('hoja_de_vida', enviar: false);
+        // El aspirante reemplaza un documento requerido (enviada la postulación no se edita: se simula con ella retirada).
+        $this->mientrasEditable($this->postulacion, fn () => $this->responder('hoja_de_vida', enviar: false));
 
         $this->actingAs($this->evaluador)->getJson("/api/evaluaciones/{$this->postulacion->id}")
             ->assertOk()
@@ -41,6 +45,8 @@ class ReaperturaEvaluacionTest extends TestCase
     {
         $this->postulacion->convocatoria->forceFill([
             'estado_id' => Parametro::porTemaYCodigo('estado_convocatoria', 'publicada')->id,
+            'fecha_apertura' => now('America/Bogota')->subDay()->toDateString(),
+            'fecha_cierre' => now('America/Bogota')->addDay()->toDateString(),
         ])->save();
 
         $this->actingAs($this->evaluador)->putJson("/api/evaluaciones/{$this->postulacion->id}", [
@@ -49,7 +55,7 @@ class ReaperturaEvaluacionTest extends TestCase
             'perfil' => ['doc-'.$this->hoja => true, 'doc-'.$this->identidad => true],
         ])->assertOk();
 
-        $this->responder('hoja_de_vida', enviar: false);
+        $this->mientrasEditable($this->postulacion, fn () => $this->responder('hoja_de_vida', enviar: false));
 
         // El evaluador revisa y vuelve a guardar la evaluación (como borrador, con criterios distintos).
         $this->actingAs($this->evaluador)->putJson("/api/evaluaciones/{$this->postulacion->id}", [

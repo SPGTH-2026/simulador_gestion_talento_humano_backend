@@ -6,6 +6,7 @@ use App\Enums\PostulacionEstado;
 use App\Models\Parametro;
 use App\Models\PerfilAspirante;
 use App\Models\Postulacion;
+use App\Services\Documentos\ReglaLibreta;
 use Illuminate\Http\Request;
 
 trait ValidaEvaluacion
@@ -120,14 +121,14 @@ trait ValidaEvaluacion
             ->with('sexo')
             ->first();
 
-        $sexoMujer = $perfil?->sexo?->codigo === 'mujer';
+        $libretaNoAplica = ReglaLibreta::noAplica($perfil, $postulacion->datosPersonales);
 
-        $documentos = $documentos->filter(function (Parametro $documento) use ($sexoMujer) {
+        $documentos = $documentos->filter(function (Parametro $documento) use ($libretaNoAplica) {
             if (! (bool) $documento->pivot->obligatorio) {
                 return false;
             }
 
-            return ! ($documento->codigo === Parametro::DOC_LIBRETA_MILITAR && $sexoMujer);
+            return ! ($documento->codigo === Parametro::DOC_LIBRETA_MILITAR && $libretaNoAplica);
         });
 
         if ($documentos->isEmpty()) {

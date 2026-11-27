@@ -28,7 +28,22 @@ class UserManagementRolesTest extends TestCase
         $this->assertSame([$ficha->id], $aspirante->fresh()->fichas()->pluck('fichas.id')->all());
     }
 
-    public function test_super_admin_no_puede_hacer_instructor_sin_ficha(): void
+    public function test_convertir_en_instructor_con_una_ficha_no_avisa_que_cree_la_suya(): void
+    {
+        $admin = $this->usuario(Role::SuperAdmin);
+        $ficha = \App\Models\Ficha::create(['codigo' => '3173335', 'nombre_programa' => 'ADSO']);
+        $aspirante = $this->usuario(Role::Aspirante, null, ['ficha_id' => $ficha->id]);
+
+        $this->actingAs($admin)->patchJson("/api/usuarios/{$aspirante->id}", [
+            'role' => 'instructor',
+            'active' => true,
+            'fichas' => [$ficha->id],
+        ])->assertOk();
+
+        $this->assertDatabaseMissing('notificaciones', ['user_id' => $aspirante->id, 'tipo' => 'instructor_crear_ficha']);
+    }
+
+    public function test_super_admin_puede_crear_instructor_sin_ficha_y_el_instructor_crea_la_suya(): void
     {
         $admin = $this->usuario(Role::SuperAdmin);
         $aspirante = $this->usuario(Role::Aspirante, null, ['ficha_id' => \App\Models\Ficha::create(['codigo' => '3173334', 'nombre_programa' => 'ADSO'])->id]);
@@ -36,7 +51,23 @@ class UserManagementRolesTest extends TestCase
         $this->actingAs($admin)->patchJson("/api/usuarios/{$aspirante->id}", [
             'role' => 'instructor',
             'active' => true,
-        ])->assertStatus(422)->assertJsonValidationErrors('fichas');
+        ])->assertOk()->assertJsonPath('data.role', 'instructor');
+
+        $instructor = $aspirante->fresh();
+        $this->assertSame([], $instructor->fichas()->pluck('fichas.id')->all());
+        // Sin fichas, el instructor recibe el aviso para crear la suya.
+        $this->assertDatabaseHas('notificaciones', ['user_id' => $aspirante->id, 'tipo' => 'instructor_crear_ficha']);
+
+        // Su propia ficha: la registra él y queda a su nombre, así que ya la administra.
+        $this->actingAs($instructor)->postJson('/api/fichas', [
+            'codigo' => '9000001',
+            'nombre_programa' => 'Mi programa',
+            'estado' => 'activa',
+        ])->assertCreated();
+        $this->assertContains(
+            \App\Models\Ficha::where('codigo', '9000001')->value('id'),
+            $instructor->fresh()->fichaIds(),
+        );
     }
 
     public function test_nadie_modifica_su_propio_usuario(): void

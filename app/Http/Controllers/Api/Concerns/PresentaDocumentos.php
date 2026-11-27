@@ -9,6 +9,8 @@ use App\Models\PerfilAspirante;
 use App\Models\Postulacion;
 use App\Models\PostulacionDocumento;
 use App\Models\User;
+use App\Services\DatosPersonalesDePostulacion;
+use App\Services\Documentos\ReglaLibreta;
 use App\Services\DocumentosDePostulacion;
 
 trait PresentaDocumentos
@@ -31,7 +33,7 @@ trait PresentaDocumentos
             ->with('sexo')
             ->first();
 
-        $sexoMujer = $perfil?->sexo?->codigo === 'mujer';
+        $libretaNoAplica = ReglaLibreta::noAplica($perfil, $postulacion->datosPersonales);
 
         $pideLibreta = $postulacion->convocatoria->documentos
             ->contains(fn (Parametro $d) => $d->codigo === Parametro::DOC_LIBRETA_MILITAR);
@@ -42,9 +44,9 @@ trait PresentaDocumentos
         $requiereSexo = $pideLibreta && $perfil === null;
 
         $documentos = $postulacion->convocatoria->documentos
-            ->map(function (Parametro $parametro) use ($porParametro, $sexoMujer) {
+            ->map(function (Parametro $parametro) use ($porParametro, $libretaNoAplica) {
                 $subido = $porParametro->get($parametro->id);
-                $noAplica = $parametro->codigo === Parametro::DOC_LIBRETA_MILITAR && $sexoMujer;
+                $noAplica = $parametro->codigo === Parametro::DOC_LIBRETA_MILITAR && $libretaNoAplica;
 
                 return [
                     'parametro' => [
@@ -98,6 +100,7 @@ trait PresentaDocumentos
             'sexo' => $perfil?->sexo
                 ? ['id' => $perfil->sexo->id, 'codigo' => $perfil->sexo->codigo, 'nombre' => $perfil->sexo->nombre]
                 : null,
+            'datos_personales' => app(DatosPersonalesDePostulacion::class)->presentar($postulacion),
             'documentos' => $documentos,
             'adicionales' => $adicionales,
             'skills' => $skills,

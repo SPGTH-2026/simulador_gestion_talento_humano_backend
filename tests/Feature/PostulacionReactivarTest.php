@@ -4,12 +4,14 @@ namespace Tests\Feature;
 
 use App\Models\Postulacion;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Concerns\DatosPersonalesAyudas;
 use Tests\Concerns\PostulacionRetiradaEditableAyudas;
 use Tests\TestCase;
 
 class PostulacionReactivarTest extends TestCase
 {
     use RefreshDatabase;
+    use DatosPersonalesAyudas;
     use PostulacionRetiradaEditableAyudas;
 
     public function test_eliminar_obligatorio_en_retirada_se_rechaza_y_la_postulacion_sigue_completa(): void
@@ -50,6 +52,7 @@ class PostulacionReactivarTest extends TestCase
         $aspirante = $this->aspirante($ficha);
         $convocatoria = $this->conDocumentos($this->convocatoriaAbierta($ficha, $instructor), ['hoja_de_vida' => true]);
         $postulacion = $this->postulacionRetirada($convocatoria, $aspirante);
+        $this->conDatosPersonales($postulacion);
         $antes = $this->estadoDe($postulacion);
 
         $this->actingAs($aspirante)
@@ -67,6 +70,7 @@ class PostulacionReactivarTest extends TestCase
         $aspirante = $this->aspirante($ficha);
         $convocatoria = $this->conDocumentos($this->convocatoriaAbierta($ficha, $instructor), ['hoja_de_vida' => true]);
         $postulacion = $this->postulacionRetirada($convocatoria, $aspirante);
+        $this->conDatosPersonales($postulacion);
 
         $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/documentos", [

@@ -15,6 +15,10 @@
             <p style="margin:0 0 12px;font-size:15px;line-height:22px;">
                 Confirma tu correo para poder usar la plataforma.
             </p>
+        @elseif ($purpose === 'set_password')
+            <p style="margin:0 0 12px;font-size:15px;line-height:22px;">
+                Recibimos una solicitud para establecer o cambiar la contraseña de tu cuenta desde una sesión abierta.
+            </p>
         @else
             <p style="margin:0 0 12px;font-size:15px;line-height:22px;">
                 Recibimos una solicitud para restablecer la contraseña de tu cuenta.
@@ -33,7 +37,7 @@
             Este código expira en <strong>{{ $ttlMinutes }} minutos</strong> y solo puede usarse una vez.
         </p>
 
-        @if ($purpose === 'reset_password')
+        @if ($purpose === 'reset_password' || $purpose === 'set_password')
             <p style="margin:0 0 8px;font-size:14px;line-height:20px;color:#52606d;">
                 Si no solicitaste esto, puedes ignorar este mensaje: tu contraseña no cambia.
             </p>

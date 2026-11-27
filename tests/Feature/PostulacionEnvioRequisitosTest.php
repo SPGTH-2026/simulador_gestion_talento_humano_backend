@@ -4,11 +4,13 @@ namespace Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Concerns\PostulacionBorradorAyudas;
+use Tests\Concerns\DatosPersonalesAyudas;
 use Tests\TestCase;
 
 class PostulacionEnvioRequisitosTest extends TestCase
 {
     use RefreshDatabase;
+    use DatosPersonalesAyudas;
     use PostulacionBorradorAyudas;
 
     public function test_sin_sexo_y_libreta_pedida_el_faltante_explica_indicar_el_sexo(): void
@@ -19,6 +21,7 @@ class PostulacionEnvioRequisitosTest extends TestCase
         $convocatoria = $this->convocatoriaAbierta($ficha, $instructor);
         $convocatoria->documentos()->attach($this->parametroId('tipo_documento', 'libreta_militar'), ['obligatorio' => true]);
         $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $this->conDatosPersonales($postulacion);
 
         $respuesta = $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/enviar")
@@ -26,11 +29,11 @@ class PostulacionEnvioRequisitosTest extends TestCase
 
         $this->assertSame('libreta_militar', $respuesta->json('faltantes.0.codigo'));
         $this->assertSame(
-            'Indica tu sexo para saber si aplica la libreta militar.',
+            'Llena tus datos personales para saber si aplica la libreta militar.',
             $respuesta->json('faltantes.0.motivo'),
         );
         $this->assertStringContainsString(
-            'Indica tu sexo para saber si aplica la libreta militar.',
+            'Llena tus datos personales para saber si aplica la libreta militar.',
             $respuesta->json('errors.documentos.0'),
         );
     }
@@ -43,6 +46,7 @@ class PostulacionEnvioRequisitosTest extends TestCase
         $convocatoria = $this->convocatoriaAbierta($ficha, $instructor);
         $convocatoria->documentos()->attach($this->parametroId('tipo_documento', 'libreta_militar'), ['obligatorio' => true]);
         $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $this->conDatosPersonales($postulacion);
 
         $this->actingAs($aspirante)->putJson('/api/perfil/sexo', ['sexo' => 'mujer'])->assertOk();
 
@@ -60,6 +64,7 @@ class PostulacionEnvioRequisitosTest extends TestCase
         $convocatoria = $this->convocatoriaAbierta($ficha, $instructor);
         $convocatoria->documentos()->attach($this->parametroId('tipo_documento', 'libreta_militar'), ['obligatorio' => true]);
         $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
+        $this->conDatosPersonales($postulacion);
 
         $this->actingAs($aspirante)->putJson('/api/perfil/sexo', ['sexo' => 'hombre'])->assertOk();
 

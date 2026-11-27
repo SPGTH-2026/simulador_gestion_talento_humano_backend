@@ -3,10 +3,13 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\Role;
+use App\Models\EmailOtp;
 use App\Models\Ficha;
 use App\Http\Controllers\Controller;
 use App\Models\SocialAccount;
 use App\Models\User;
+use App\Services\ContrasenaDeCuenta;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -24,15 +27,31 @@ class SocialAuthController extends Controller
     /** Clave de sesión con los datos de Google de un aspirante que todavía no eligió ficha. */
     private const CLAVE_PENDIENTE = 'google_pendiente';
 
-    public function redirect(string $provider)
+    /** Clave donde Socialite guarda el state al iniciar. */
+    private const CLAVE_STATE = 'state';
+
+    /** Hora (timestamp) en que este navegador inició el acceso con Google. */
+    private const CLAVE_INICIO = 'google_oauth_inicio';
+
+    /** Vigencia de un inicio de acceso con Google: pasado este tiempo hay que volver a empezar. */
+    private const VIGENCIA_INICIO_SEGUNDOS = 600;
+
+    /**
+     * TEMPORAL (recuperación del acceso, 26-nov-2026): si la sesión no tiene state, el callback canjea el código igual, como
+     * hacía 90a9af4. Ponerlo en false restituye el rechazo estricto ('ausente') sin tocar nada más.
+     */
+    private const TOLERAR_SIN_STATE_EN_SESION = true;
+
+    public function redirect(Request $request, string $provider)
     {
         abort_unless(in_array($provider, self::PROVIDERS, true), 404);
 
-        // Con estado: el 'state' se guarda en la sesión y se valida en el
-        // callback. Si la sesión no llega al callback (front y back en
-        // dominios distintos) el callback sigue funcionando en modo
-        // stateless; ver usuarioSocialite().
-        return Socialite::driver($provider)->redirect();
+        // El inicio deja en la SESIÓN de este navegador el state (lo guarda Socialite) y la hora. El callback solo se atiende
+        // si trae ese mismo state, una sola vez y dentro de la vigencia; ver estadoDelInicioValido().
+        $respuesta = Socialite::driver($provider)->redirect();
+        $request->session()->put(self::CLAVE_INICIO, now()->timestamp);
+
+        return $respuesta;
     }
 
     public function callback(Request $request, string $provider): RedirectResponse
@@ -40,22 +59,42 @@ class SocialAuthController extends Controller
         abort_unless(in_array($provider, self::PROVIDERS, true), 404);
         $front = rtrim(config('app.frontend_url'), '/');
 
-        try {
-            $social = $this->usuarioSocialite($request, $provider);
-        } catch (\Throwable $e) {
-            // Lo más común es que el código ya se haya gastado: doble clic en
-            // "Entrar con Google", botón atrás o recargar el callback. Google
-            // responde invalid_grant y no hay nada que recuperar, pero el
-            // usuario ya tiene sesión: se le lleva al front en vez de
-            // mostrarle un error.
-            if (Auth::guard('web')->check()) {
-                return redirect($front);
-            }
+        // Con la sesión ya abierta (doble clic, «atrás», recargar, o un enlace ajeno) el callback NO canjea el código ni vincula
+        // nada: se consume el state y se vuelve al front. Así un callback recibido no puede cambiar la cuenta de la sesión.
+        if (Auth::guard('web')->check()) {
+            $this->estadoDelInicioValido($request);
 
-            Log::warning('No se pudo completar el inicio de sesión con Google.', [
+            return redirect($front);
+        }
+
+        // Antes de canjear el código con Google: el intento tiene que continuar un inicio hecho desde ESTE navegador.
+        $sinStateEnSesion = (string) $request->session()->get(self::CLAVE_STATE, '') === '';
+        $motivo = $this->estadoDelInicioValido($request);
+        if ($motivo === 'ausente' && $sinStateEnSesion && self::TOLERAR_SIN_STATE_EN_SESION) {
+            // TEMPORAL: comportamiento de la versión que funcionaba (90a9af4). Sin state en la sesión se canjea igual; un state
+            // presente que no coincide, o caducado, se sigue rechazando. Nunca se registran valores.
+            Log::warning('Acceso con Google sin state en la sesión: se acepta en modo permisivo temporal.', ['provider' => $provider]);
+            $motivo = 'ok';
+        }
+        if ($motivo !== 'ok') {
+            // El motivo describe qué comprobación falló; nunca se registran los valores del state ni del código.
+            Log::warning('Acceso con Google rechazado: el inicio no es válido.', [
                 'provider' => $provider,
-                'motivo' => $e->getMessage(),
-                'url' => $request->fullUrl(),
+                'motivo' => $motivo,
+            ]);
+
+            return redirect("$front/login?error=oauth_estado");
+        }
+
+        try {
+            // La validación del state ya se hizo arriba (y se consumió), por eso el canje no repite la de Socialite.
+            $social = Socialite::driver($provider)->stateless()->user();
+        } catch (\Throwable $e) {
+            // Lo más común es que el código ya se haya gastado: Google responde invalid_grant y no hay nada que recuperar.
+            // No se registran el mensaje, la URL ni el código: pueden contener valores sensibles.
+            Log::warning('No se pudo canjear el código de Google.', [
+                'provider' => $provider,
+                'excepcion' => class_basename($e),
             ]);
 
             return redirect("$front/login?error=oauth_codigo");
@@ -76,11 +115,12 @@ class SocialAuthController extends Controller
                 return redirect("$front/login?error=correo_no_verificado");
             }
 
-            // Google ya confirmó que el correo pertenece a quien entra, así que si
-            // existe un usuario con ese correo (ej. el super admin creado con
-            // app:make-admin) se le enlaza esta cuenta social en lugar de crear
-            // otro usuario. Así "Entrar con Google" reconoce al mismo dueño y
-            // conserva su rol; el rol nunca se toma del proveedor.
+            // Coincidir el correo NO basta para vincular. La identidad de una cuenta de Google es su identificador (getId), no el
+            // correo, que puede cambiar de dueño. Se vincula a una cuenta existente solo cuando hay evidencia de control:
+            //  - Google confirmó el correo (comprobado arriba) y
+            //  - la cuenta no está desactivada ni ya vinculada a OTRA identidad de Google, y
+            //  - si el correo de la cuenta NO estaba verificado, quien la creó pudo ser otra persona (pre-secuestro): se vincula,
+            //    pero antes se le retiran todas las credenciales que dejó (contraseña, sesiones, tokens y códigos).
             $user = User::where('email', $social->getEmail())->first();
 
             if (! $user) {
@@ -96,7 +136,27 @@ class SocialAuthController extends Controller
                 return redirect("$front/completar-ficha?pendiente=google");
             }
 
-            $user->socialAccounts()->create(['provider' => $provider, 'provider_id' => (string) $social->getId()]);
+            if (! $user->active) {
+                return redirect("$front/login?error=desactivado");
+            }
+
+            if ($user->socialAccounts()->where('provider', $provider)->exists()) {
+                Log::warning('Intento de vincular una segunda identidad de Google a una cuenta ya vinculada.', ['user_id' => $user->id]);
+
+                return redirect("$front/login?error=google_distinto");
+            }
+
+            try {
+                DB::transaction(function () use ($user, $provider, $social) {
+                    if ($user->email_verified_at === null) {
+                        $this->retirarCredencialesPrevias($user, (string) ($social->getName() ?: $social->getEmail()));
+                    }
+                    $user->socialAccounts()->create(['provider' => $provider, 'provider_id' => (string) $social->getId()]);
+                });
+            } catch (UniqueConstraintViolationException) {
+                // Dos callbacks simultáneos con la misma identidad: el otro ya la vinculó.
+                return redirect("$front/login?error=oauth");
+            }
         }
 
         if (! $user->active) {
@@ -155,6 +215,7 @@ class SocialAuthController extends Controller
                 'name' => $datos['name'],
                 'email' => $datos['email'],
                 'password' => Str::random(40), // no se usa; la cuenta entra por el proveedor
+                'password_estado' => ContrasenaDeCuenta::SIN_DEFINIR, // generada por el sistema, no elegida por la persona
                 'role' => Role::Aspirante,     // el rol NUNCA viene del proveedor
                 'ficha_id' => $ficha->id,
                 'active' => true,
@@ -176,28 +237,55 @@ class SocialAuthController extends Controller
     }
 
     /**
-     * Usuario de Google del callback.
-     *
-     * El flujo normal es CON estado: el 'state' se guardó en la sesión al
-     * redirigir y aquí se valida (protección CSRF). Si la sesión no llegó al
-     * callback —típico cuando el front y el back se sirven en dominios
-     * distintos— se sigue en modo stateless: el código de Google sigue
-     * siendo de un solo uso y está atado a nuestro client_id y redirect_uri.
+     * La cuenta existía sin haber verificado nunca su correo: no hay prueba de que quien la creó controle ese buzón. Se deja
+     * sin nada utilizable de esa etapa: contraseña (aleatoria; solo se recupera con el correo), recordar sesión, sesiones,
+     * tokens y códigos pendientes. Los datos que eligió esa persona tampoco se heredan: en un aspirante, el nombre sale de
+     * Google y la ficha la elige quien entra; en personal creado por un administrador se conservan rol y ficha.
      */
-    private function usuarioSocialite(Request $request, string $provider): \Laravel\Socialite\Two\User
+    private function retirarCredencialesPrevias(User $user, string $nombreDeGoogle): void
     {
-        $driver = Socialite::driver($provider);
-        $estadoSesion = (string) $request->session()->get('state', '');
-        $estadoUrl = (string) $request->input('state', '');
+        $user->forceFill(['password' => Str::random(40), 'password_estado' => ContrasenaDeCuenta::SIN_DEFINIR, 'remember_token' => null]);
+        if ($user->role === Role::Aspirante) {
+            $user->forceFill(['name' => $nombreDeGoogle, 'ficha_id' => null]);
+        }
+        $user->save();
 
-        if ($estadoSesion === '') {
-            return $driver->stateless()->user();
+        DB::table('sessions')->where('user_id', $user->id)->delete();
+        $user->tokens()->delete();
+        EmailOtp::where('email', $user->email)->delete();
+        DB::table('password_reset_tokens')->where('email', $user->email)->delete();
+    }
+
+    /**
+     * Comprueba el inicio de acceso con Google de esta sesión y devuelve el motivo: 'ok' o el rechazo ('ausente', 'distinto',
+     * 'sin_hora' o 'caducado'). El state debe estar en la sesión y en la URL, y ser idéntico.
+     *
+     * Un state que NO coincide no toca el inicio vigente: un callback viejo (otra pestaña, un reintento) no puede invalidar el
+     * intento que sigue en curso. Un state que coincide se consume aquí mismo, acierte o caduque, así que solo sirve una vez.
+     * No hay modo alternativo sin state.
+     */
+    private function estadoDelInicioValido(Request $request): string
+    {
+        $enSesion = (string) $request->session()->get(self::CLAVE_STATE, '');
+        $enUrl = (string) $request->query('state', '');
+
+        if ($enSesion === '' || $enUrl === '') {
+            return 'ausente';
         }
 
-        if ($estadoUrl === '' || ! hash_equals($estadoSesion, $estadoUrl)) {
-            throw new \RuntimeException('El estado de la autenticación no coincide.');
+        if (! hash_equals($enSesion, $enUrl)) {
+            return 'distinto';
         }
 
-        return $driver->user();
+        $inicio = (int) $request->session()->pull(self::CLAVE_INICIO, 0);
+        $request->session()->forget(self::CLAVE_STATE);
+
+        if ($inicio <= 0) {
+            return 'sin_hora';
+        }
+
+        $transcurrido = now()->timestamp - $inicio;
+
+        return $transcurrido >= 0 && $transcurrido <= self::VIGENCIA_INICIO_SEGUNDOS ? 'ok' : 'caducado';
     }
 }

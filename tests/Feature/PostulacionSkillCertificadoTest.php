@@ -56,6 +56,7 @@ class PostulacionSkillCertificadoTest extends TestCase
             'nombre' => 'Pintura',
         ]);
 
+        $this->enviada($postulacion);
         $instructor = $this->instructor($aspirante->ficha);
 
         $skills = collect(

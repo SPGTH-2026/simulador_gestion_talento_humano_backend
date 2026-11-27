@@ -10,12 +10,14 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Tests\Concerns\EvaluacionAyudas;
+use Tests\Concerns\MientrasEditable;
 use Tests\TestCase;
 
 class EvaluacionCorreccionPlazoTest extends TestCase
 {
     use RefreshDatabase;
     use EvaluacionAyudas;
+    use MientrasEditable;
 
     public function test_pedir_correccion_fija_plazo_de_dos_dias_que_se_conserva_y_se_limpia_al_finalizar(): void
     {
@@ -177,13 +179,14 @@ class EvaluacionCorreccionPlazoTest extends TestCase
             ->assertJsonPath('data.evaluacion.estado', 'finalizada')
             ->assertJsonPath('data.evaluacion.pasa_seleccion', true);
 
-        // Si el aspirante reemplaza el documento (ya existía: 200), la evaluación finalizada pasa a en_proceso.
-        $this->actingAs($aspirante)
+        // Si el aspirante reemplaza el documento (ya existía: 200), la evaluación finalizada pasa a en_proceso. Enviada la
+        // postulación no se edita: el cambio se simula con ella retirada.
+        $this->mientrasEditable($postulacion, fn () => $this->actingAs($aspirante)
             ->withHeaders(['Accept' => 'application/json'])
             ->post("/api/postulaciones/{$postulacion->id}/documentos", [
                 'codigo' => 'hoja_de_vida',
                 'archivo' => UploadedFile::fake()->create('hoja_nueva.pdf', 100, 'application/pdf'),
-            ])->assertOk();
+            ])->assertOk());
 
         $this->actingAs($evaluador)->getJson("/api/evaluaciones/{$postulacion->id}")
             ->assertOk()
