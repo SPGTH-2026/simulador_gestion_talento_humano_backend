@@ -30,10 +30,17 @@ trait DocumentosDeConvocatoria
         foreach (array_values($documentos) as $indice => $documento) {
             $referencia = $documento;
             $ponderacion = null;
+            $items = null;
 
             if (is_array($documento)) {
                 // El 'obligatorio' del formato extendido se acepta pero se ignora.
                 $referencia = $documento['codigo'] ?? $documento['id'] ?? null;
+
+                // Ítems del checklist del documento: texto con un ítem por línea (máximo 2000 caracteres).
+                $texto = is_string($documento['items'] ?? null) ? trim($documento['items']) : '';
+                if ($texto !== '') {
+                    $items = mb_substr($texto, 0, 2000);
+                }
 
                 $valor = $documento['ponderacion'] ?? null;
                 if ($valor !== null && $valor !== '') {
@@ -70,49 +77,13 @@ trait DocumentosDeConvocatoria
 
             $id = (int) $parametro->id;
             if (! array_key_exists($id, $normalizados)) {
-                $normalizados[$id] = ['id' => $id, 'ponderacion' => $ponderacion];
+                $normalizados[$id] = ['id' => $id, 'ponderacion' => $ponderacion, 'items' => $items];
             }
         }
 
         return array_values($normalizados);
     }
 
-    /**
-     * Valida la configuración de porcentajes de los documentos.
-     *
-     * Reglas:
-     *  - Sin ninguna ponderación enviada: válido. La convocatoria queda sin
-     *    configurar y la evaluación reparte el 100 % en partes iguales.
-     *  - Con ponderaciones: TODOS los documentos deben tener la suya y la suma
-     *    debe ser 100 % (±0,01 por redondeos de dos decimales).
-     */
-    private function validarPonderaciones(array $documentos, array &$errores): void
-    {
-        $configurados = array_filter(
-            $documentos,
-            fn ($documento) => ($documento['ponderacion'] ?? null) !== null,
-        );
-
-        if ($configurados === []) {
-            return;
-        }
-
-        if (count($configurados) !== count($documentos)) {
-            $errores['documentos'][] = 'Define el porcentaje de todos los documentos: deben sumar 100%.';
-
-            return;
-        }
-
-        $suma = array_sum(array_map(
-            fn ($documento) => (float) $documento['ponderacion'],
-            $documentos,
-        ));
-
-        if (abs($suma - 100) > 0.01) {
-            $errores['documentos'][] = 'Los porcentajes de los documentos deben sumar 100% (suman '
-                .number_format($suma, 2, ',', '.').'%).';
-        }
-    }
 
     /**
      * Combina los documentos elegidos por el gestor con los siempre
@@ -124,7 +95,7 @@ trait DocumentosDeConvocatoria
      *
      * La ponderación enviada por el gestor se conserva; los obligatorios que el
      * backend agrega por su cuenta quedan sin ponderación (null) y se validan
-     * después en validarPonderaciones.
+     * después en validarPorcentajes (ValidaConvocatoria).
      *
      * @param  array<int, array{id:int, ponderacion:float|null}>|null  $documentos
      * @return array<int, array{id:int, obligatorio:bool, ponderacion:float|null}>
@@ -137,7 +108,7 @@ trait DocumentosDeConvocatoria
 
         // 1) Los siempre obligatorios, en el orden de config y con true.
         foreach (array_keys($obligatorios) as $id) {
-            $final[$id] = ['id' => $id, 'obligatorio' => true, 'ponderacion' => null];
+            $final[$id] = ['id' => $id, 'obligatorio' => true, 'ponderacion' => null, 'items' => null];
         }
 
         // 2) Los elegidos por el gestor (sin repetir los obligatorios). TODO
@@ -149,6 +120,7 @@ trait DocumentosDeConvocatoria
 
             if (array_key_exists($id, $final)) {
                 $final[$id]['ponderacion'] = $ponderacion;
+                $final[$id]['items'] = $documento['items'] ?? null;
 
                 continue;
             }
@@ -157,6 +129,7 @@ trait DocumentosDeConvocatoria
                 'id' => $id,
                 'obligatorio' => true,
                 'ponderacion' => $ponderacion,
+                'items' => $documento['items'] ?? null,
             ];
         }
 
@@ -197,6 +170,7 @@ trait DocumentosDeConvocatoria
             $sincronizar[(int) $documento['id']] = [
                 'obligatorio' => (bool) ($documento['obligatorio'] ?? false),
                 'ponderacion' => $documento['ponderacion'] ?? null,
+                'items' => $documento['items'] ?? null,
             ];
         }
 

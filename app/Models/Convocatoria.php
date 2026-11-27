@@ -87,7 +87,7 @@ class Convocatoria extends Model
     public function documentos(): BelongsToMany
     {
         return $this->belongsToMany(Parametro::class, 'convocatoria_documentos', 'convocatoria_id', 'parametro_id')
-            ->withPivot('obligatorio', 'ponderacion');
+            ->withPivot('obligatorio', 'ponderacion', 'items');
     }
 
     /** Postulaciones recibidas. La ficha de la postulación vive aquí, no en la postulación. */

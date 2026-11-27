@@ -174,25 +174,84 @@ trait ValidaEvaluacion
      */
     private function calcularCumplimiento(Postulacion $postulacion, ?array $perfil): ?int
     {
-        $pesos = $this->pesosDocumentos($postulacion);
+        // Documentos y habilidades ponderadas comparten la misma escala: su suma es el 100 % de la convocatoria.
+        $elementos = [];
+        foreach ($this->pesosDocumentos($postulacion) as $parametroId => $peso) {
+            $elementos["doc-{$parametroId}"] = $peso;
+        }
+        foreach ($this->pesosHabilidades($postulacion) as $skillId => $peso) {
+            $elementos["skill-{$skillId}"] = $peso;
+        }
 
-        if ($pesos === []) {
+        if ($elementos === []) {
             return null;
         }
 
-        $total = array_sum($pesos);
+        $total = array_sum($elementos);
 
         if ($total <= 0) {
             return null;
         }
 
         $obtenido = 0.0;
-        foreach ($pesos as $parametroId => $peso) {
-            if (! empty($perfil["doc-{$parametroId}"])) {
-                $obtenido += $peso;
+        foreach ($elementos as $clave => $peso) {
+            if (! empty($perfil[$clave])) {
+                // Un documento con checklist aporta solo la parte de sus ítems marcados como «Cumple».
+                $fraccion = str_starts_with($clave, 'doc-')
+                    ? $this->fraccionChecklistDocumento($postulacion, (int) substr($clave, 4), $perfil)
+                    : 1.0;
+                $obtenido += $peso * $fraccion;
             }
         }
 
         return (int) round(min(100.0, ($obtenido / $total) * 100));
+    }
+
+    /**
+     * Parte de un documento que aporta según su checklist: ítems marcados «Cumple» / total de ítems. Sin ítems = 1 (el
+     * documento completo cuenta cuando se marca «Cumple»).
+     */
+    private function fraccionChecklistDocumento(Postulacion $postulacion, int $parametroId, ?array $perfil): float
+    {
+        $documento = $postulacion->convocatoria?->documentos?->firstWhere('id', $parametroId);
+        $texto = $documento?->pivot?->items;
+
+        if ($texto === null || trim((string) $texto) === '') {
+            return 1.0;
+        }
+
+        $lineas = array_values(array_filter(array_map('trim', explode("\n", (string) $texto)), fn ($linea) => $linea !== ''));
+
+        if ($lineas === []) {
+            return 1.0;
+        }
+
+        $cumplen = 0;
+        foreach (array_keys($lineas) as $indice) {
+            if (! empty($perfil["docitem-{$parametroId}-{$indice}"])) {
+                $cumplen++;
+            }
+        }
+
+        return $cumplen / count($lineas);
+    }
+
+    /**
+     * Porcentaje de cada habilidad de la convocatoria (id de la skill => %). Las habilidades sin porcentaje no cuentan
+     * en el cumplimiento: solo se muestran.
+     *
+     * @return array<int, float>
+     */
+    private function pesosHabilidades(Postulacion $postulacion): array
+    {
+        $pesos = [];
+
+        foreach ($postulacion->convocatoria?->skills ?? collect() as $skill) {
+            if ($skill->ponderacion !== null) {
+                $pesos[(int) $skill->id] = (float) $skill->ponderacion;
+            }
+        }
+
+        return $pesos;
     }
 }

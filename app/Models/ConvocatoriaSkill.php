@@ -19,7 +19,7 @@ class ConvocatoriaSkill extends Model
 {
     protected $table = 'convocatoria_skills';
 
-    protected $fillable = ['convocatoria_id', 'nombre', 'parametro_id'];
+    protected $fillable = ['convocatoria_id', 'nombre', 'parametro_id', 'ponderacion'];
 
     public function convocatoria(): BelongsTo
     {
