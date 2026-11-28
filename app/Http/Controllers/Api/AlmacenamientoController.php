@@ -194,7 +194,8 @@ class AlmacenamientoController extends Controller
             }
 
             try {
-                $this->escribe->eliminar($documento);
+                // Almacenamiento es la herramienta del administrador: borra también los obligatorios (el archivo sale del disco).
+                $this->escribe->eliminar($documento, incluirObligatorios: true);
                 $borrados[] = $id;
             } catch (ValidationException $e) {
                 $omitidos[] = ['id' => $id, 'motivo' => collect($e->errors())->flatten()->first() ?? 'No se pudo borrar.'];
@@ -235,8 +236,9 @@ class AlmacenamientoController extends Controller
             'tipo' => $d->esAdicional() ? 'adicional' : 'requerido',
             'titulo' => $d->esAdicional() ? $d->titulo : $d->parametro?->nombre,
             'obligatorio' => $obligatorio,
-            // Los obligatorios no se borran: se reemplazan (misma regla que en el servicio de documentos).
-            'borrable' => $d->esAdicional() || ! $obligatorio,
+            // Todo documento se puede borrar desde Almacenamiento; el aspirante sigue reemplazando sus obligatorios.
+            'borrable' => true,
+            'aspirante_id' => $postulacion->user_id,
             'aspirante' => $postulacion->user?->name,
             'convocatoria' => $postulacion->convocatoria?->nombre,
             'tamano_bytes' => (int) $d->tamano_bytes,

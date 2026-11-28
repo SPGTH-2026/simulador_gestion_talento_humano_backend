@@ -167,7 +167,8 @@ class AlmacenamientoTest extends TestCase
             ->assertJsonPath('ficha.codigo', '2896411');
         $filas = collect($respuesta->json('data'));
 
-        $this->assertFalse($filas->firstWhere('id', $obligatorio->id)['borrable']);
+        // Desde Almacenamiento todo documento se puede borrar; el obligatorio se marca solo como información.
+        $this->assertTrue($filas->firstWhere('id', $obligatorio->id)['borrable']);
         $this->assertTrue($filas->firstWhere('id', $obligatorio->id)['obligatorio']);
         $this->assertTrue($filas->firstWhere('id', $extra->id)['borrable']);
         $this->assertSame('Certificado diploma.pdf', $filas->firstWhere('id', $extra->id)['titulo']);
@@ -195,7 +196,7 @@ class AlmacenamientoTest extends TestCase
             ->json('data.totales.bytes'));
     }
 
-    public function test_un_obligatorio_se_omite_con_su_motivo_y_los_demas_se_borran(): void
+    public function test_un_obligatorio_tambien_se_borra_con_su_archivo_desde_almacenamiento(): void
     {
         $ficha = $this->ficha('2896411');
         $instructor = $this->usuario(Role::Instructor);
@@ -206,10 +207,10 @@ class AlmacenamientoTest extends TestCase
             ->postJson('/api/almacenamiento/documentos/borrar', ['ids' => [$obligatorio->id, $extra->id]])
             ->assertOk();
 
-        $this->assertSame([$extra->id], $respuesta->json('data.borrados'));
-        $this->assertSame($obligatorio->id, $respuesta->json('data.omitidos.0.id'));
-        $this->assertStringContainsString('obligatorio', $respuesta->json('data.omitidos.0.motivo'));
-        $this->assertDatabaseHas('postulacion_documentos', ['id' => $obligatorio->id]);
+        $this->assertEqualsCanonicalizing([$obligatorio->id, $extra->id], $respuesta->json('data.borrados'));
+        $this->assertSame([], $respuesta->json('data.omitidos'));
+        $this->assertDatabaseMissing('postulacion_documentos', ['id' => $obligatorio->id]);
+        Storage::disk($this->disco)->assertMissing($obligatorio->ruta);
     }
 
     public function test_un_documento_de_otra_ficha_no_se_borra_ni_se_revela(): void

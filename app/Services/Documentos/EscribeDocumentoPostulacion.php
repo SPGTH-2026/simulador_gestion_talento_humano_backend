@@ -186,9 +186,11 @@ final class EscribeDocumentoPostulacion
      * Borra la fila y su archivo. Un documento OBLIGATORIO no se elimina (RF-DOC-006): solo se reemplaza. Los adicionales
      * y los opcionales sí se pueden eliminar.
      */
-    public function eliminar(PostulacionDocumento $documento): void
+    public function eliminar(PostulacionDocumento $documento, bool $incluirObligatorios = false): void
     {
-        $this->exigirQueNoSeaObligatorio($documento);
+        if (! $incluirObligatorios) {
+            $this->exigirQueNoSeaObligatorio($documento);
+        }
 
         $disco = $documento->disco;
         $ruta = $documento->ruta;
