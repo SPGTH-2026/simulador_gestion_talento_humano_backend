@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Enums\Role;
 use App\Models\Evaluacion;
 use App\Models\Postulacion;
+use App\Services\Evaluacion\PuntajeDeEvaluacion;
 use App\Services\RondasCorreccion;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\JsonResponse;
@@ -109,9 +110,52 @@ class EvaluacionAspiranteController extends Controller
 
         $resumen = $rondas->resumen($postulacion, $request->user());
 
+        if ($resumen['ronda_actual'] === null) {
+            return response()->json(['data' => null]);
+        }
+
+        $evaluacionId = $rondas->rondas($postulacion)->last()?->evaluacion_id;
+
         return response()->json([
-            'data' => $resumen['ronda_actual'] === null ? null : ['correccion' => $resumen],
+            'data' => [
+                'correccion' => $resumen,
+                // Por documento (id del parámetro), los puntos de su checklist que el evaluador marcó «No cumple».
+                'items_no_cumplidos' => $this->itemsNoCumplidos($postulacion, $evaluacionId ? Evaluacion::find($evaluacionId) : null),
+            ],
         ]);
+    }
+
+    /**
+     * Los ítems del checklist que el evaluador marcó «No cumple», agrupados por documento. Solo se llama para la corrección que el
+     * aspirante tiene pedida: un borrador del evaluador no llega hasta aquí.
+     *
+     * @return array<string, list<string>>
+     */
+    private function itemsNoCumplidos(Postulacion $postulacion, ?Evaluacion $evaluacion): array
+    {
+        if ($evaluacion === null) {
+            return [];
+        }
+
+        $perfil = (array) $evaluacion->perfil;
+        $puntaje = app(PuntajeDeEvaluacion::class);
+        $postulacion->loadMissing('convocatoria.documentos');
+        $salida = [];
+
+        foreach ($postulacion->convocatoria->documentos as $documento) {
+            $fallan = [];
+            foreach ($puntaje->itemsDeDocumento($postulacion, (int) $documento->id) as $n => $texto) {
+                if (($perfil["docitem-{$documento->id}-{$n}"] ?? null) === false) {
+                    $fallan[] = $texto;
+                }
+            }
+
+            if ($fallan !== []) {
+                $salida[(string) $documento->id] = $fallan;
+            }
+        }
+
+        return $salida;
     }
 
     /**
