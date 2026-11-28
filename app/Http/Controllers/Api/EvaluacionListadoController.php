@@ -33,6 +33,8 @@ class EvaluacionListadoController extends Controller
             ->with([
                 'user:id,name,email,ficha_id',
                 'user.perfilAspirante.sexo',
+                // El estado se lee en cada fila: sin cargarlo aquí sería una consulta por aspirante.
+                'estado:id,codigo,nombre',
                 'datosPersonales',
                 'convocatoria:id,nombre,cargo,estado_id,ficha_id,fecha_evaluacion',
                 'convocatoria.estado:id,codigo,nombre',
