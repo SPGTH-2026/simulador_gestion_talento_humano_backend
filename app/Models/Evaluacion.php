@@ -34,7 +34,7 @@ class Evaluacion extends Model
         return [
             'puntaje_total' => 'decimal:2',
             'perfil' => 'array',
-            'cumplimiento' => 'integer',
+            'cumplimiento' => 'float',
             'pasa_seleccion' => 'boolean',
             'correccion_enviada_at' => 'datetime',
             'fecha_limite_correccion' => 'datetime',

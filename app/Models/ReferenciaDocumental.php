@@ -21,7 +21,7 @@ class ReferenciaDocumental extends Model
     protected function casts(): array
     {
         return [
-            'cumplimiento' => 'integer',
+            'cumplimiento' => 'float',
             // Revisión de la evaluación elegida al designarla; 0 = nunca vigente (referencias que ya eran inválidas).
             'evaluacion_revision' => 'integer',
             'pasa_seleccion' => 'boolean',

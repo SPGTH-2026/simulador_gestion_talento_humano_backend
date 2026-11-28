@@ -85,7 +85,7 @@ trait ResultadosDocumentales
      * mostrar y los datos de la referencia (id y vigencia) para detectar cambios.
      *
      * @param  Collection<int, int>  $postulacionIds
-     * @return Collection<int, array{estado: string, cumplimiento: ?int, ref_id: ?int, vigente: bool}>
+     * @return Collection<int, array{estado: string, cumplimiento: ?float, ref_id: ?int, vigente: bool}>
      */
     protected function estadosDocumentales(Collection $postulacionIds): Collection
     {
@@ -103,7 +103,7 @@ trait ResultadosDocumentales
             [$estado, $cumplimiento] = $this->clasificarEstadoDocumental(
                 $total,
                 (int) ($r->habilitadas ?? 0),
-                $total === 1 ? (int) $r->cumplimiento : null,
+                $total === 1 ? (float) $r->cumplimiento : null,
                 $ref['ref'] ?? null,
                 $ref['vigente'] ?? false,
             );
@@ -121,7 +121,7 @@ trait ResultadosDocumentales
      * Estado documental actual de UNA postulación, con la misma regla del listado
      * de candidatos y de la referencia (no recalcula el cumplimiento).
      *
-     * @return array{0: string, 1: ?int} estado y cumplimiento a mostrar
+     * @return array{0: string, 1: ?float} estado y cumplimiento a mostrar
      */
     protected function estadoDocumentalDe(int $postulacionId): array
     {
@@ -134,7 +134,7 @@ trait ResultadosDocumentales
         return $this->clasificarEstadoDocumental(
             $total,
             (int) $resultado->habilitadas,
-            $total === 1 ? (int) $resultado->cumplimiento : null,
+            $total === 1 ? (float) $resultado->cumplimiento : null,
             $referencia['ref'] ?? null,
             $referencia['vigente'] ?? false,
         );
@@ -158,12 +158,12 @@ trait ResultadosDocumentales
      * evaluación finalizada (no se vuelve a una referencia anterior por descarte).
      * Sin referencia: 0 resultados pendiente, 1 el automático, varios revisión.
      *
-     * @return array{0: string, 1: ?int} estado y cumplimiento a mostrar (null = sin dato)
+     * @return array{0: string, 1: ?float} estado y cumplimiento a mostrar (null = sin dato)
      */
     protected function clasificarEstadoDocumental(
         int $elegibles,
         int $habilitadas,
-        ?int $cumplimientoUnico,
+        ?float $cumplimientoUnico,
         ?ReferenciaDocumental $ref,
         bool $vigente,
     ): array {

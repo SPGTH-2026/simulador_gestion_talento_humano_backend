@@ -54,7 +54,7 @@ class SeleccionReferenciaReconfirmarTest extends TestCase
         $evento = ReferenciaDocumental::first();
         $this->assertNotNull($evento);
         $this->assertNull($evento->evaluacion_id);
-        $this->assertSame(90, $evento->cumplimiento);
+        $this->assertEquals(90, $evento->cumplimiento);
         $this->assertSame('requiere_revision', $this->fila($instructor, $convocatoria, $postulacion)['estado_documental']);
     }
 

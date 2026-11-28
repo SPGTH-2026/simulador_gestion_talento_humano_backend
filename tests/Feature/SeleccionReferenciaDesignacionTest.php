@@ -85,7 +85,7 @@ class SeleccionReferenciaDesignacionTest extends TestCase
         $eventos = ReferenciaDocumental::query()->orderBy('id')->get();
         $this->assertCount(2, $eventos);
         $this->assertSame([$a->id, $b->id], $eventos->pluck('evaluacion_id')->all());
-        $this->assertSame([90, 30], $eventos->pluck('cumplimiento')->all());
+        $this->assertEquals([90, 30], $eventos->pluck('cumplimiento')->all());
         $this->assertSame([$instructor->id, $instructor->id], $eventos->pluck('designado_por')->all());
         $this->assertSame('no_habilitado', $this->fila($instructor, $convocatoria, $postulacion)['estado_documental']);
     }
