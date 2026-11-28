@@ -18,7 +18,17 @@ class DatosPersonalesRequest extends FormRequest
 {
     private const DOCUMENTO = '/^[A-Za-z0-9]{5,20}$/';
 
-    private const TELEFONO = '/^\+?[0-9 ]{7,15}$/';
+    // Nombres de personas: solo letras (con tildes y ñ), espacios, apóstrofo, punto y guion. Empiezan con una letra.
+    private const NOMBRE = '/^\p{L}[\p{L}\s\'’.\-]*$/u';
+
+    // Dirección: letras, números, espacios y los signos de una dirección colombiana (# - . , ° /).
+    private const DIRECCION = '/^[\p{L}\p{N}\s#\-.,°º\/\'’]+$/u';
+
+    /**
+     * Teléfono con código del país: «+57 3001234567». Colombia (+57) lleva exactamente 10 dígitos; otro país, entre 6 y 12. Se
+     * siguen aceptando los guardados antes de existir el código (solo dígitos, 7 a 15).
+     */
+    private const TELEFONO = '/^(\+57 \d{10}|\+(?!57 )[1-9]\d{0,2} \d{6,12}|\d{7,15})$/';
 
     public function authorize(): bool
     {
@@ -32,8 +42,8 @@ class DatosPersonalesRequest extends FormRequest
             'sexo' => ['required', 'string'],
             'tipo_documento_identidad' => ['required', 'string'],
             'numero_documento' => ['required', 'string', 'regex:'.self::DOCUMENTO],
-            'nombres' => ['required', 'string', 'min:2', 'max:100'],
-            'apellidos' => ['required', 'string', 'min:2', 'max:100'],
+            'nombres' => ['required', 'string', 'min:2', 'max:100', 'regex:'.self::NOMBRE],
+            'apellidos' => ['required', 'string', 'min:2', 'max:100', 'regex:'.self::NOMBRE],
             'fecha_nacimiento' => ['required', 'date_format:Y-m-d', 'before:today', 'after:1900-01-01'],
             'telefono' => ['required', 'string', 'regex:'.self::TELEFONO],
             // Códigos oficiales del DANE (DIVIPOLA): 2 dígitos el departamento y 5 el municipio, que debe ser de ese departamento.
@@ -42,12 +52,12 @@ class DatosPersonalesRequest extends FormRequest
                 'required', 'string',
                 Rule::exists('municipios', 'codigo')->where('departamento_codigo', (string) $this->input('departamento')),
             ],
-            'direccion' => ['nullable', 'string', 'max:150'],
+            'direccion' => ['nullable', 'string', 'max:150', 'regex:'.self::DIRECCION],
             'nivel_formacion' => ['required', 'string'],
-            'representante_nombre' => ['nullable', 'string', 'min:3', 'max:150'],
+            'representante_nombre' => ['nullable', 'string', 'min:3', 'max:150', 'regex:'.self::NOMBRE],
             'representante_documento' => ['nullable', 'string', 'regex:'.self::DOCUMENTO],
             'representante_telefono' => ['nullable', 'string', 'regex:'.self::TELEFONO],
-            'representante_parentesco' => ['nullable', 'string', 'min:3', 'max:40'],
+            'representante_parentesco' => ['nullable', 'string', 'min:3', 'max:40', 'regex:'.self::NOMBRE],
             'representante_tipo_documento' => ['nullable', 'string'],
             'representante_correo' => ['nullable', 'email', 'max:150'],
             'representante_telefono_alterno' => ['nullable', 'string', 'regex:'.self::TELEFONO],
@@ -71,6 +81,9 @@ class DatosPersonalesRequest extends FormRequest
     public function after(): array
     {
         return [function (Validator $validator): void {
+            $this->exigirDocumentoNumerico($validator, 'tipo_documento_identidad', 'numero_documento');
+            $this->exigirDocumentoNumerico($validator, 'representante_tipo_documento', 'representante_documento');
+
             if ($validator->errors()->has('fecha_nacimiento') || ! $this->filled('fecha_nacimiento')) {
                 return;
             }
@@ -117,6 +130,18 @@ class DatosPersonalesRequest extends FormRequest
         }];
     }
 
+    /** Cédula, tarjeta de identidad, cédula de extranjería y PPT son solo números (hasta 15 dígitos); el pasaporte admite letras. */
+    private function exigirDocumentoNumerico(Validator $validator, string $tipo, string $numero): void
+    {
+        if (! $this->filled($tipo) || ! $this->filled($numero) || $validator->errors()->has($numero) || $this->input($tipo) === 'pasaporte') {
+            return;
+        }
+
+        if (! preg_match('/^[0-9]{5,15}$/', (string) $this->input($numero))) {
+            $validator->errors()->add($numero, 'Este tipo de documento solo lleva números (entre 5 y 15 dígitos, sin puntos ni letras).');
+        }
+    }
+
     /** @return array<string, string> */
     public function messages(): array
     {
@@ -131,6 +156,14 @@ class DatosPersonalesRequest extends FormRequest
             'after' => 'La fecha de nacimiento no es válida.',
             'departamento.exists' => 'Selecciona un departamento de la lista.',
             'municipio.exists' => 'Selecciona un municipio de la lista que pertenezca al departamento elegido.',
+            'telefono.regex' => 'El teléfono debe llevar el código del país y solo números: en Colombia (+57) son 10 dígitos.',
+            'representante_telefono.regex' => 'El teléfono del representante debe llevar el código del país y solo números: en Colombia (+57) son 10 dígitos.',
+            'representante_telefono_alterno.regex' => 'El teléfono alterno debe llevar el código del país y solo números: en Colombia (+57) son 10 dígitos.',
+            'nombres.regex' => 'Los nombres solo pueden llevar letras.',
+            'apellidos.regex' => 'Los apellidos solo pueden llevar letras.',
+            'representante_nombre.regex' => 'El nombre del representante solo puede llevar letras.',
+            'representante_parentesco.regex' => 'El parentesco solo puede llevar letras.',
+            'direccion.regex' => 'La dirección tiene caracteres que no se permiten.',
         ];
     }
 
@@ -142,6 +175,7 @@ class DatosPersonalesRequest extends FormRequest
             'tipo_documento_identidad' => 'tipo de documento',
             'numero_documento' => 'número de documento',
             'fecha_nacimiento' => 'fecha de nacimiento',
+            'direccion' => 'dirección',
             'telefono' => 'teléfono',
             'nivel_formacion' => 'nivel de formación',
             'representante_nombre' => 'nombre del representante',
