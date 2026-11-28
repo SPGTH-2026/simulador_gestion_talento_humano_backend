@@ -17,14 +17,58 @@ trait LeeRondas
     /** Rondas efectivas: guardadas más las antiguas aún sin convertir, en orden cronológico. */
     public function rondas(Postulacion $postulacion): Collection
     {
+        if (isset($this->precargadas[$postulacion->id])) {
+            return $this->precargadas[$postulacion->id];
+        }
+
         $guardadas = CorreccionPostulacion::query()
             ->where('postulacion_id', $postulacion->id)
             ->orderBy('solicitada_at')->orderBy('id')
             ->get();
 
+        return $this->combinar($guardadas, $this->legadas($postulacion));
+    }
+
+    /** Rondas ya leídas por postulación: solo existen mientras dura una lectura en lote (ver precargar). */
+    private array $precargadas = [];
+
+    /**
+     * Lee de una vez las rondas de varias postulaciones (dos consultas en total) para un listado de solo lectura: sin esto,
+     * cada fila pediría las suyas. Debe llamarse olvidarPrecarga() al terminar, para que nada quede viejo si luego se escribe.
+     *
+     * @param  Collection<int, Postulacion>  $postulaciones
+     */
+    public function precargar(Collection $postulaciones): void
+    {
+        $ids = $postulaciones->pluck('id')->all();
+        $guardadas = CorreccionPostulacion::query()
+            ->whereIn('postulacion_id', $ids)
+            ->orderBy('solicitada_at')->orderBy('id')
+            ->get()->groupBy('postulacion_id');
+        $evaluaciones = Evaluacion::query()
+            ->whereIn('postulacion_id', $ids)
+            ->where('estado', 'correccion_solicitada')
+            ->get()->groupBy('postulacion_id');
+
+        foreach ($postulaciones as $postulacion) {
+            $this->precargadas[$postulacion->id] = $this->combinar(
+                $guardadas->get($postulacion->id, new Collection),
+                $this->legadasDe($postulacion, $evaluaciones->get($postulacion->id, new Collection)),
+            );
+        }
+    }
+
+    public function olvidarPrecarga(): void
+    {
+        $this->precargadas = [];
+    }
+
+    /** Guardadas más las solicitudes antiguas que aún no tienen ronda, numeradas y en orden cronológico. */
+    private function combinar(Collection $guardadas, Collection $legadas): Collection
+    {
         $conRonda = $guardadas->pluck('evaluacion_id')->filter()->all();
 
-        $legadas = $this->legadas($postulacion)->reject(fn (CorreccionPostulacion $r) => in_array($r->evaluacion_id, $conRonda, true));
+        $legadas = $legadas->reject(fn (CorreccionPostulacion $r) => in_array($r->evaluacion_id, $conRonda, true));
 
         $siguiente = (int) $guardadas->where('tipo', 'ordinaria')->max('numero');
         foreach ($legadas->sortBy('solicitada_at') as $virtual) {
@@ -40,10 +84,16 @@ trait LeeRondas
      */
     public function legadas(Postulacion $postulacion): Collection
     {
-        return Evaluacion::query()
+        return $this->legadasDe($postulacion, Evaluacion::query()
             ->where('postulacion_id', $postulacion->id)
             ->where('estado', 'correccion_solicitada')
-            ->get()
+            ->get());
+    }
+
+    /** @param  Collection<int, Evaluacion>  $evaluaciones  las evaluaciones en «corrección solicitada» de la postulación */
+    private function legadasDe(Postulacion $postulacion, Collection $evaluaciones): Collection
+    {
+        return $evaluaciones
             ->map(function (Evaluacion $e) use ($postulacion) {
                 $marcados = collect($e->perfil ?? [])
                     ->filter(fn ($v, $k) => $v === false && str_starts_with((string) $k, 'doc-'))

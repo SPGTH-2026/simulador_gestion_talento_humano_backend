@@ -18,6 +18,9 @@ class AppServiceProvider extends ServiceProvider
         // no cambian, y el listado de convocatorias los resolvía con una consulta
         // por cada llamada. "scoped" se reinicia en cada petición y en cada prueba.
         $this->app->scoped('parametros.memo', fn () => new \ArrayObject());
+
+        // Una sola instancia por petición: así la lectura en lote de rondas (RondasCorreccion::precargar) la ven todos los que la usan.
+        $this->app->scoped(\App\Services\RondasCorreccion::class);
     }
 
     public function boot(): void

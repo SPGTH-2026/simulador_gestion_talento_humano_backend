@@ -8,6 +8,7 @@ use App\Models\Convocatoria;
 use App\Models\Evaluacion;
 use App\Models\Ficha;
 use App\Models\Postulacion;
+use App\Services\RondasCorreccion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Api\Concerns\PresentaEvaluacion;
@@ -84,10 +85,19 @@ class EvaluacionListadoController extends Controller
             ->groupBy('postulacion_id')
             ->map(fn ($grupo) => $this->seleccionarEvaluacionVisible($grupo));
 
-        return response()->json([
-            'data' => $pagina->getCollection()->map(
+        // Las rondas de corrección de toda la página se leen juntas: pedirlas fila por fila eran cuatro consultas por aspirante.
+        $rondas = app(RondasCorreccion::class);
+        $rondas->precargar($pagina->getCollection());
+        try {
+            $filas = $pagina->getCollection()->map(
                 fn (Postulacion $p) => $this->presentar($p, $evaluaciones->get($p->id), $actor)
-            ),
+            );
+        } finally {
+            $rondas->olvidarPrecarga();
+        }
+
+        return response()->json([
+            'data' => $filas,
             'meta' => [
                 'current_page' => $pagina->currentPage(),
                 'last_page' => $pagina->lastPage(),
