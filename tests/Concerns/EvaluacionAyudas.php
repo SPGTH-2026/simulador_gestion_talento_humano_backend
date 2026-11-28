@@ -90,6 +90,17 @@ trait EvaluacionAyudas
         return $postulacion;
     }
 
+    /** Perfil con todos los documentos obligatorios de la convocatoria calificados (todos «Cumple» o todos «No cumple»). */
+    private function perfilDeTodos(Postulacion $postulacion, bool $cumple = true): array
+    {
+        $postulacion->convocatoria->load('documentos');
+
+        return $postulacion->convocatoria->documentos
+            ->filter(fn ($documento) => (bool) $documento->pivot->obligatorio)
+            ->mapWithKeys(fn ($documento) => ['doc-'.$documento->id => $cumple])
+            ->all();
+    }
+
     /** @param array<int,array<string,mixed>> $criterios */
     private function criterios(array $criterios = []): array
     {

@@ -29,6 +29,7 @@ class EvaluacionRegistroTest extends TestCase
             'observaciones' => 'Buen perfil',
             'estado' => 'finalizada',
             'criterios' => $this->criterios(),
+            'perfil' => $this->perfilDeTodos($postulacion),
         ])->assertOk()
             ->assertJsonPath('data.evaluacion.estado', 'finalizada')
             ->assertJsonPath('data.evaluacion.puntaje_total', '73.33')

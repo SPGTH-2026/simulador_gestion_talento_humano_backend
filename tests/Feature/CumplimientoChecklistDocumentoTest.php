@@ -6,7 +6,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Concerns\RondasCorreccionAyudas;
 use Tests\TestCase;
 
-/** Un documento con checklist aporta la parte de sus ítems marcados como «Cumple» (no todo su peso). */
+/** Un documento con checklist aporta la parte de sus ítems marcados como «Cumple» (no todo su peso); los ítems mandan. */
 class CumplimientoChecklistDocumentoTest extends TestCase
 {
     use RefreshDatabase;
@@ -41,12 +41,20 @@ class CumplimientoChecklistDocumentoTest extends TestCase
             'doc-'.$this->identidad => true,
         ]))->assertOk()->assertJsonPath('data.evaluacion.cumplimiento', 100);
 
-        // Documento marcado «No cumple»: aporta 0 aunque tenga ítems marcados.
+        // Ningún ítem cumple: el documento aporta 0 y solo cuenta la identidad.
+        $this->actingAs($this->evaluador)->putJson("/api/evaluaciones/{$this->postulacion->id}", $cuerpo([
+            'doc-'.$this->hoja => false,
+            'docitem-'.$this->hoja.'-0' => false,
+            'docitem-'.$this->hoja.'-1' => false,
+            'doc-'.$this->identidad => true,
+        ]))->assertOk()->assertJsonPath('data.evaluacion.cumplimiento', 50);
+
+        // Los ítems mandan: aunque el documento llegue como «No cumple», con ítems cumplidos aporta su parte.
         $this->actingAs($this->evaluador)->putJson("/api/evaluaciones/{$this->postulacion->id}", $cuerpo([
             'doc-'.$this->hoja => false,
             'docitem-'.$this->hoja.'-0' => true,
             'docitem-'.$this->hoja.'-1' => true,
             'doc-'.$this->identidad => true,
-        ]))->assertOk()->assertJsonPath('data.evaluacion.cumplimiento', 50);
+        ]))->assertOk()->assertJsonPath('data.evaluacion.cumplimiento', 100);
     }
 }

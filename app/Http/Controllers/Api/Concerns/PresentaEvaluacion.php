@@ -7,6 +7,7 @@ use App\Models\Parametro;
 use App\Models\Postulacion;
 use App\Models\User;
 use App\Services\Documentos\ReglaLibreta;
+use App\Services\Evaluacion\PuntajeDeEvaluacion;
 use App\Services\RondasCorreccion;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -69,6 +70,8 @@ trait PresentaEvaluacion
                 'id' => $p->convocatoria?->id,
                 'titulo' => $p->convocatoria?->nombre,
                 'estado' => $p->convocatoria?->estado?->codigo,
+                // Fecha informativa de inicio de la evaluación: no bloquea nada.
+                'fecha_evaluacion' => $p->convocatoria?->fecha_evaluacion?->toDateString(),
                 // Requisitos que pidió la convocatoria: cada línea es un ítem del checklist del evaluador.
                 'requisitos' => [
                     'formacion' => $p->convocatoria?->formacion,
@@ -77,6 +80,8 @@ trait PresentaEvaluacion
                     'conocimientos_especificos' => $p->convocatoria?->conocimientos_especificos,
                 ],
             ],
+            // Puntos máximos de cada documento y habilidad y de cada bloque (solo en el detalle; ver PuntajeDeEvaluacion).
+            'puntos' => $conCorreccion ? app(PuntajeDeEvaluacion::class)->puntos($p) : null,
             'documentos' => [
                 'total' => $docsRequeridos,
                 'cargados' => $docsCargados,

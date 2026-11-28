@@ -33,6 +33,15 @@ class ChecklistRequisitosTest extends TestCase
             ->assertJsonPath('data.convocatoria.requisitos.conocimientos_especificos', 'PHP y SQL');
     }
 
+    public function test_el_detalle_incluye_la_fecha_de_evaluacion_de_la_convocatoria(): void
+    {
+        $this->postulacion->convocatoria->forceFill(['fecha_evaluacion' => '2026-12-15'])->save();
+
+        $this->actingAs($this->evaluador)->getJson("/api/evaluaciones/{$this->postulacion->id}")
+            ->assertOk()
+            ->assertJsonPath('data.convocatoria.fecha_evaluacion', '2026-12-15');
+    }
+
     public function test_las_marcas_y_el_documento_de_cada_requisito_se_guardan_sin_cambiar_el_cumplimiento(): void
     {
         $documentos = ['doc-'.$this->hoja => true, 'doc-'.$this->identidad => true];

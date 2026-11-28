@@ -87,7 +87,7 @@ trait ValidaConvocatoria
                 : null;
         }
 
-        // Porcentajes de documentos y habilidades: juntos suman 100 %. Se validan sobre la lista FINAL (con los obligatorios
+        // Porcentajes de documentos y de habilidades: cada bloque suma 100 %. Se validan sobre la lista FINAL (con los obligatorios
         // que agrega el backend) y con lo que ya estaba guardado cuando la petición no lo envía.
         $documentosFinal = $documentos !== null
             ? $this->conDocumentosObligatorios($documentos)
@@ -124,40 +124,42 @@ trait ValidaConvocatoria
     }
 
     /**
-     * Porcentajes de la convocatoria. Sin ningún porcentaje: queda sin configurar (la evaluación reparte en partes iguales).
-     * Con porcentajes: TODOS los documentos y TODAS las habilidades deben tener el suyo y la suma total debe ser 100 %.
+     * Porcentajes de la convocatoria. Cada bloque se valida POR SEPARADO: los documentos entre sí y las habilidades entre sí.
+     * Sin ningún porcentaje en un bloque, queda sin configurar (se reparte en partes iguales). Con porcentajes: TODOS los
+     * elementos del bloque deben tener el suyo y la suma debe ser 100 %. Luego el sistema lleva los documentos a 90 puntos y las
+     * habilidades a 10 (ver PuntajeDeEvaluacion).
      *
      * @param  array<int, array{ponderacion: float|null}>  $documentos
      * @param  array<int, array{ponderacion: float|null}>  $skills
      */
     private function validarPorcentajes(array $documentos, array $skills, array &$errores): void
     {
-        $todos = [...$documentos, ...$skills];
-        $hayPorcentajes = array_filter($todos, fn ($x) => ($x['ponderacion'] ?? null) !== null) !== [];
+        $this->validarBloque($documentos, 'documentos', 'documentos', 'todos los documentos', $errores);
+        $this->validarBloque($skills, 'skills', 'habilidades', 'cada habilidad de la convocatoria', $errores);
+    }
 
-        if (! $hayPorcentajes) {
+    /**
+     * @param  array<int, array{ponderacion: float|null}>  $elementos
+     */
+    private function validarBloque(array $elementos, string $campo, string $plural, string $quien, array &$errores): void
+    {
+        $configurados = array_filter($elementos, fn ($x) => ($x['ponderacion'] ?? null) !== null);
+
+        if ($configurados === []) {
             return;
         }
 
-        $documentosSinPorcentaje = array_filter($documentos, fn ($d) => ($d['ponderacion'] ?? null) === null);
-        $skillsSinPorcentaje = array_filter($skills, fn ($s) => ($s['ponderacion'] ?? null) === null);
+        if (count($configurados) !== count($elementos)) {
+            $errores[$campo][] = "Define el porcentaje de {$quien}: los porcentajes de las {$plural} deben sumar 100%.";
 
-        if ($documentosSinPorcentaje !== []) {
-            $errores['documentos'][] = 'Define el porcentaje de todos los documentos: documentos y habilidades deben sumar 100%.';
-        }
-
-        if ($skillsSinPorcentaje !== []) {
-            $errores['skills'][] = 'Define el porcentaje de cada habilidad de la convocatoria.';
-        }
-
-        if ($documentosSinPorcentaje !== [] || $skillsSinPorcentaje !== []) {
             return;
         }
 
-        $suma = array_sum(array_map(fn ($x) => (float) $x['ponderacion'], $todos));
+        $suma = array_sum(array_map(fn ($x) => (float) $x['ponderacion'], $elementos));
 
-        if (abs($suma - 100) > 0.01) {
-            $errores['documentos'][] = 'Los porcentajes de documentos y habilidades deben sumar 100% (suman '
+        // La base guarda dos decimales: tres partes iguales (33,33 × 3) suman 99,99. Cada valor puede errar media centésima.
+        if (abs($suma - 100) > max(0.01, 0.005 * count($elementos)) + 1e-9) {
+            $errores[$campo][] = "Los porcentajes de las {$plural} deben sumar 100% (suman "
                 .rtrim(rtrim(number_format($suma, 2, '.', ''), '0'), '.').'%).';
         }
     }

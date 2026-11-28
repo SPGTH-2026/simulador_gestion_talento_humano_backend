@@ -191,6 +191,7 @@ class EvaluacionAlcanceTest extends TestCase
         // El Instructor corrige esa misma evaluación como administrador.
         $this->actingAs($instructor)->putJson("/api/evaluaciones/{$postulacion->id}", [
             'estado' => 'finalizada',
+            'observaciones' => 'Falta el documento de identidad.',
             'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 50, 'ponderacion' => 1]],
             'perfil' => [
                 'doc-'.$ids['hoja_de_vida'] => true,

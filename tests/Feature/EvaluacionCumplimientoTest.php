@@ -32,6 +32,7 @@ class EvaluacionCumplimientoTest extends TestCase
         // Solo cumple el documento que vale 80 % → 80 % de cumplimiento.
         $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
             'estado' => 'finalizada',
+            'observaciones' => 'Falta el documento de identidad.',
             'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 80, 'ponderacion' => 1]],
             'perfil' => [
                 'doc-'.$ids['hoja_de_vida'] => true,
@@ -89,6 +90,7 @@ class EvaluacionCumplimientoTest extends TestCase
         // Dos documentos sin peso y solo uno cumplido → 50 %.
         $this->actingAs($evaluador)->putJson("/api/evaluaciones/{$postulacion->id}", [
             'estado' => 'finalizada',
+            'observaciones' => 'Falta el documento de identidad.',
             'criterios' => [['criterio' => 'Evaluación', 'puntaje' => 50, 'ponderacion' => 1]],
             'perfil' => [
                 'doc-'.$ids['hoja_de_vida'] => true,

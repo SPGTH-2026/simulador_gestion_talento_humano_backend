@@ -170,7 +170,9 @@ class NotificacionesPorRolTest extends TestCase
 
         $this->actingAs($p['evaluador'])->putJson("/api/evaluaciones/{$postulacion->id}", [
             'estado' => 'finalizada',
+            'observaciones' => 'No cumple lo que pide la convocatoria.',
             'criterios' => [['criterio' => 'Experiencia', 'puntaje' => 10, 'ponderacion' => 1]],
+            'perfil' => $this->perfilDeTodos($postulacion, false),
         ])->assertOk();
 
         $this->assertSame($this->ids([$p['aspirante'], $p['instructor']]), $this->recibidos('evaluacion_finalizada'));
@@ -186,6 +188,7 @@ class NotificacionesPorRolTest extends TestCase
         $this->actingAs($p['instructor'])->putJson("/api/evaluaciones/{$postulacion->id}", [
             'estado' => 'finalizada',
             'criterios' => [['criterio' => 'Experiencia', 'puntaje' => 10, 'ponderacion' => 1]],
+            'perfil' => $this->perfilDeTodos($postulacion),
         ])->assertOk();
 
         $this->assertSame([$p['aspirante']->id], $this->recibidos('evaluacion_finalizada'));

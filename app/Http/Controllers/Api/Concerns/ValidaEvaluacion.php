@@ -3,10 +3,8 @@
 namespace App\Http\Controllers\Api\Concerns;
 
 use App\Enums\PostulacionEstado;
-use App\Models\Parametro;
-use App\Models\PerfilAspirante;
 use App\Models\Postulacion;
-use App\Services\Documentos\ReglaLibreta;
+use App\Services\Evaluacion\PuntajeDeEvaluacion;
 use Illuminate\Http\Request;
 
 trait ValidaEvaluacion
@@ -55,13 +53,68 @@ trait ValidaEvaluacion
 
         $nombres = fn ($ids) => $postulacion->convocatoria->documentos->whereIn('id', $ids)->pluck('nombre')->implode(', ');
 
-        $marcados = $faltantes->filter(fn (int $id) => ! empty($perfil["doc-{$id}"]))->values();
+        $puntaje = app(PuntajeDeEvaluacion::class);
+        $marcados = $faltantes->filter(fn (int $id) => $puntaje->documentoMarcado($perfil, $id))->values();
         if ($marcados->isNotEmpty()) {
             abort(422, 'No puedes marcar «Cumple» un documento que el aspirante no ha cargado: '.$nombres($marcados).'.');
         }
 
         if ($estado === 'finalizada') {
             abort(422, 'No se puede finalizar la evaluación: faltan documentos obligatorios ('.$nombres($faltantes).'). Solicita la corrección al aspirante.');
+        }
+    }
+
+    /**
+     * Para FINALIZAR no puede quedar nada sin calificar: cada documento (o cada ítem de su checklist) y cada habilidad que el
+     * aspirante declaró deben tener «Cumple» o «No cumple». Y si algo quedó en «No cumple», las observaciones explican el motivo.
+     * Un borrador o una solicitud de corrección sí pueden quedar a medias.
+     */
+    private function exigirEvaluacionCompleta(Postulacion $postulacion, ?array $perfil, ?string $observaciones, string $estado): void
+    {
+        if ($estado !== 'finalizada') {
+            return;
+        }
+
+        $postulacion->loadMissing('convocatoria.documentos', 'convocatoria.skills', 'skills');
+        $puntaje = app(PuntajeDeEvaluacion::class);
+        $puntos = $puntaje->puntos($postulacion);
+        $respondido = fn (string $clave) => is_bool($perfil[$clave] ?? null);
+        $sinCalificar = [];
+
+        foreach (array_keys($puntos['documentos']) as $documentoId) {
+            $nombre = (string) $postulacion->convocatoria->documentos->firstWhere('id', $documentoId)?->nombre;
+            $items = $puntaje->itemsDeDocumento($postulacion, $documentoId);
+
+            if ($items === []) {
+                if (! $respondido("doc-{$documentoId}")) {
+                    $sinCalificar[] = $nombre;
+                }
+
+                continue;
+            }
+
+            $faltan = collect(array_keys($items))->filter(fn (int $n) => ! $respondido("docitem-{$documentoId}-{$n}"))->count();
+            if ($faltan > 0) {
+                $sinCalificar[] = $nombre.' ('.$faltan.($faltan === 1 ? ' ítem' : ' ítems').')';
+            }
+        }
+
+        $declaradas = $postulacion->skills->pluck('convocatoria_skill_id')->filter()->map(fn ($id) => (int) $id)->all();
+        foreach (array_keys($puntos['habilidades']) as $skillId) {
+            if (in_array($skillId, $declaradas, true) && ! $respondido("skill-{$skillId}")) {
+                $sinCalificar[] = (string) $postulacion->convocatoria->skills->firstWhere('id', $skillId)?->nombre;
+            }
+        }
+
+        if ($sinCalificar !== []) {
+            abort(422, 'No se puede finalizar: faltan por calificar '.implode(', ', $sinCalificar).'.');
+        }
+
+        $hayNoCumple = collect($perfil ?? [])->contains(fn ($valor, $clave) => $valor === false
+            && preg_match('/^(doc|docitem|skill)-/', (string) $clave) === 1);
+
+        if ($hayNoCumple && trim((string) $observaciones) === '') {
+            abort(422, 'Hay requisitos marcados «No cumple»: explica el motivo en las observaciones antes de finalizar.');
         }
     }
 
@@ -96,162 +149,21 @@ trait ValidaEvaluacion
     }
 
     /**
-     * Pesos (%) de los documentos OBLIGATORIOS y APLICABLES de la convocatoria,
-     * indexados por id del parámetro (tipo_documento). Si la convocatoria no
-     * configuró ponderaciones (todas null) se reparte el 100 % en partes
-     * iguales, que es el comportamiento histórico. Si solo algunas están
-     * configuradas (no debería pasar: el alta lo valida), el resto se reparte
-     * con lo que sobra.
+     * Pesos relativos de los documentos obligatorios y aplicables (ver PuntajeDeEvaluacion).
      *
      * @return array<int, float>
      */
     private function pesosDocumentos(Postulacion $postulacion): array
     {
-        $documentos = $postulacion->convocatoria?->documentos ?? collect();
-
-        if ($documentos->isEmpty()) {
-            return [];
-        }
-
-        // Solo cuentan los documentos OBLIGATORIOS y APLICABLES, con la misma
-        // regla que usa el envío (DocumentosDePostulacion): un documento
-        // opcional no debe restar, y la libreta militar de una mujer no aplica.
-        $perfil = PerfilAspirante::query()
-            ->where('user_id', $postulacion->user_id)
-            ->with('sexo')
-            ->first();
-
-        $libretaNoAplica = ReglaLibreta::noAplica($perfil, $postulacion->datosPersonales);
-
-        $documentos = $documentos->filter(function (Parametro $documento) use ($libretaNoAplica) {
-            if (! (bool) $documento->pivot->obligatorio) {
-                return false;
-            }
-
-            return ! ($documento->codigo === Parametro::DOC_LIBRETA_MILITAR && $libretaNoAplica);
-        });
-
-        if ($documentos->isEmpty()) {
-            return [];
-        }
-
-        $pesos = [];
-        $sinPeso = [];
-        $suma = 0.0;
-
-        foreach ($documentos as $documento) {
-            $valor = $documento->pivot->ponderacion;
-
-            if ($valor === null) {
-                $sinPeso[] = (int) $documento->id;
-
-                continue;
-            }
-
-            $pesos[(int) $documento->id] = (float) $valor;
-            $suma += (float) $valor;
-        }
-
-        if ($sinPeso === []) {
-            return $pesos;
-        }
-
-        $cuota = max(0.0, 100.0 - $suma) / count($sinPeso);
-
-        foreach ($sinPeso as $id) {
-            $pesos[$id] = $cuota;
-        }
-
-        return $pesos;
+        return app(PuntajeDeEvaluacion::class)->pesosDocumentos($postulacion);
     }
 
     /**
-     * Cumplimiento ponderado (0-100) a partir de lo marcado por el evaluador.
-     *
-     * El `perfil` llega como { "doc-{parametro_id}": true|false } desde la
-     * pantalla de evaluación. Se suma el peso de cada documento OBLIGATORIO y
-     * APLICABLE marcado como cumplido sobre el total de pesos configurados.
+     * Cumplimiento (0-100) a partir de lo marcado por el evaluador. La regla completa (90 % documentos, 10 % habilidades
+     * declaradas, checklist por documento) vive en PuntajeDeEvaluacion.
      */
-    private function calcularCumplimiento(Postulacion $postulacion, ?array $perfil): ?int
+    private function calcularCumplimiento(Postulacion $postulacion, ?array $perfil): ?float
     {
-        // Documentos y habilidades ponderadas comparten la misma escala: su suma es el 100 % de la convocatoria.
-        $elementos = [];
-        foreach ($this->pesosDocumentos($postulacion) as $parametroId => $peso) {
-            $elementos["doc-{$parametroId}"] = $peso;
-        }
-        foreach ($this->pesosHabilidades($postulacion) as $skillId => $peso) {
-            $elementos["skill-{$skillId}"] = $peso;
-        }
-
-        if ($elementos === []) {
-            return null;
-        }
-
-        $total = array_sum($elementos);
-
-        if ($total <= 0) {
-            return null;
-        }
-
-        $obtenido = 0.0;
-        foreach ($elementos as $clave => $peso) {
-            if (! empty($perfil[$clave])) {
-                // Un documento con checklist aporta solo la parte de sus ítems marcados como «Cumple».
-                $fraccion = str_starts_with($clave, 'doc-')
-                    ? $this->fraccionChecklistDocumento($postulacion, (int) substr($clave, 4), $perfil)
-                    : 1.0;
-                $obtenido += $peso * $fraccion;
-            }
-        }
-
-        return (int) round(min(100.0, ($obtenido / $total) * 100));
-    }
-
-    /**
-     * Parte de un documento que aporta según su checklist: ítems marcados «Cumple» / total de ítems. Sin ítems = 1 (el
-     * documento completo cuenta cuando se marca «Cumple»).
-     */
-    private function fraccionChecklistDocumento(Postulacion $postulacion, int $parametroId, ?array $perfil): float
-    {
-        $documento = $postulacion->convocatoria?->documentos?->firstWhere('id', $parametroId);
-        $texto = $documento?->pivot?->items;
-
-        if ($texto === null || trim((string) $texto) === '') {
-            return 1.0;
-        }
-
-        $lineas = array_values(array_filter(array_map('trim', explode("\n", (string) $texto)), fn ($linea) => $linea !== ''));
-
-        if ($lineas === []) {
-            return 1.0;
-        }
-
-        $cumplen = 0;
-        foreach (array_keys($lineas) as $indice) {
-            if (! empty($perfil["docitem-{$parametroId}-{$indice}"])) {
-                $cumplen++;
-            }
-        }
-
-        return $cumplen / count($lineas);
-    }
-
-    /**
-     * Porcentaje de cada habilidad de la convocatoria (id de la skill => %). Las habilidades sin porcentaje no cuentan
-     * en el cumplimiento: solo se muestran.
-     *
-     * @return array<int, float>
-     */
-    private function pesosHabilidades(Postulacion $postulacion): array
-    {
-        $pesos = [];
-
-        foreach ($postulacion->convocatoria?->skills ?? collect() as $skill) {
-            if ($skill->ponderacion !== null) {
-                $pesos[(int) $skill->id] = (float) $skill->ponderacion;
-            }
-        }
-
-        return $pesos;
+        return app(PuntajeDeEvaluacion::class)->cumplimiento($postulacion, $perfil);
     }
 }

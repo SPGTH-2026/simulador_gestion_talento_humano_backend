@@ -52,6 +52,7 @@ class NotificacionesDisparadoresTest extends TestCase
             'observaciones' => 'Buen perfil',
             'estado' => 'finalizada',
             'criterios' => $this->criterios(),
+            'perfil' => $this->perfilDeTodos($postulacion),
         ])->assertOk();
 
         // Guardar otra vez la evaluación ya finalizada (con otra observación) no es un nuevo paso a «finalizada».
@@ -59,6 +60,7 @@ class NotificacionesDisparadoresTest extends TestCase
             'observaciones' => 'Buen perfil, sin cambios de fondo',
             'estado' => 'finalizada',
             'criterios' => $this->criterios(),
+            'perfil' => $this->perfilDeTodos($postulacion),
         ])->assertOk();
 
         $avisos = Notificacion::query()->where('user_id', $aspirante->id)->get();

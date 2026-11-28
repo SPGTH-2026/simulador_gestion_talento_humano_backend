@@ -78,7 +78,7 @@ class EvaluacionController extends Controller
             'criterios.*.puntaje' => ['required', 'numeric', 'min:0', 'max:100'],
             'criterios.*.ponderacion' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'perfil' => ['nullable', 'array'],
-            'cumplimiento' => ['nullable', 'integer', 'min:0', 'max:100'],
+            'cumplimiento' => ['nullable', 'numeric', 'min:0', 'max:100'],
         ]);
 
         // Si el evaluador manda a corregir, debe indicar qué documento(s) no
@@ -109,6 +109,7 @@ class EvaluacionController extends Controller
 
         // Un obligatorio aplicable sin archivo no puede marcarse «Cumple» ni permite finalizar (RF-DOC-006 + RF-EVA-003).
         $this->exigirDocumentosCargados($postulacion, $datos['perfil'] ?? null, $datos['estado'] ?? 'en_proceso');
+        $this->exigirEvaluacionCompleta($postulacion, $datos['perfil'] ?? null, $datos['observaciones'] ?? null, $datos['estado'] ?? 'en_proceso');
 
         $evaluacion = DB::transaction(function () use ($request, $postulacion, $datos, $calculado) {
             $actor = $request->user();
