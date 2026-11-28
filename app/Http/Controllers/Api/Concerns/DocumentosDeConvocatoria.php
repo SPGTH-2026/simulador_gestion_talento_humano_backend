@@ -133,7 +133,23 @@ trait DocumentosDeConvocatoria
             ];
         }
 
+        // 3) Todo documento lleva checklist: si el gestor no escribió el suyo, se guarda el predeterminado de ese documento
+        //    (config/convocatorias.php). Los documentos nuevos del catálogo, sin predeterminado, quedan sin checklist.
+        foreach ($final as $id => $documento) {
+            if (trim((string) ($documento['items'] ?? '')) === '') {
+                $final[$id]['items'] = $this->checklistPredeterminadoDe($id);
+            }
+        }
+
         return array_values($final);
+    }
+
+    /** Checklist predeterminado del documento (por el código de su parámetro), o null si ese documento no tiene. */
+    private function checklistPredeterminadoDe(int $parametroId): ?string
+    {
+        $codigo = Parametro::query()->whereKey($parametroId)->value('codigo');
+
+        return $codigo ? config('convocatorias.checklist_por_defecto.'.$codigo) : null;
     }
 
     /**

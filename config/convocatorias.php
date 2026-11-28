@@ -41,14 +41,34 @@ return [
         'tarjeta_profesional',
     ],
 
+    // Checklist predeterminado de cada documento (un ítem por línea): lo que el evaluador marca «Cumple» / «No cumple». Cada
+    // convocatoria guarda su propia copia al crearse o editarse (si el gestor no escribe otra), así todos los documentos básicos
+    // llevan checklist y el puntaje por ítems funciona igual en todas. Debe coincidir con CHECKLIST_POR_DEFECTO del frontend
+    // (lib/documentosConvocatoria.js), que lo precarga en el asistente.
+    'checklist_por_defecto' => [
+        'hoja_de_vida' => "Datos personales completos (nombre, documento, dirección, teléfono, correo)
+Formación académica registrada
+Experiencia laboral con cargo y fechas
+Firmada",
+        'documento_identidad' => "Fotocopia legible
+Documento vigente (no vencido)
+Datos coinciden con la hoja de vida",
+        'certificados_academicos' => "Certificado de bachiller
+Certificado de tecnólogo o profesional (si el cargo lo pide)
+Certificados de educación informal (si los tiene)
+Certificados legibles y con firma o sello de la institución",
+        'certificados_laborales' => "Certificación laboral
+Indica cargo, funciones y fechas de inicio y fin
+Firmada por el empleador, con datos de contacto",
+        'libreta_militar' => "Fotocopia legible
+Situación militar definida",
+        'tarjeta_profesional' => "Fotocopia legible
+Vigente (no vencida)",
+    ],
+
     // Límites del paso de documentos de la postulación.
-    //  - Máximo de documentos ADICIONALES ("tipo otro") por postulación.
-    //  - Máximo de skills que el aspirante declara (de la convocatoria o propias).
-    //  - Longitudes máximas del título y la nota de un adicional.
-    'documentos_adicionales_max' => 5,
+    //  - Máximo de skills que el aspirante declara (solo las que pide la convocatoria).
     'skills_postulacion_max' => 30,
-    'titulo_adicional_max_longitud' => 120,
-    'nota_adicional_max_longitud' => 500,
 
     // Regla de negocio PENDIENTE (NO implementada todavía; queda escrita aquí y
     // en el módulo de documentos para cuando se construya):
