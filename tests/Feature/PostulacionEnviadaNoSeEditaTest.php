@@ -9,7 +9,7 @@ use Tests\Concerns\PostulacionDocumentoAyudas;
 use Tests\TestCase;
 
 /**
- * Enviada la postulación no se cambia nada: ni documentos obligatorios, ni adicionales, ni habilidades. Para cambiar algo se
+ * Enviada la postulación no se cambia nada: ni documentos ni habilidades. Para cambiar algo se
  * retira y se vuelve a postular. (La única excepción, una corrección vigente, se prueba en PostulacionDocumentoCorreccionTest.)
  */
 class PostulacionEnviadaNoSeEditaTest extends TestCase
@@ -48,28 +48,17 @@ class PostulacionEnviadaNoSeEditaTest extends TestCase
         $this->assertDatabaseCount('postulacion_documentos', 0);
     }
 
-    public function test_enviada_no_deja_agregar_documentos_adicionales(): void
-    {
-        [$aspirante, $postulacion] = $this->escenario('postulada');
-
-        $this->subir($aspirante, $postulacion, 'documentos/adicionales', ['titulo' => 'Maestría'])
-            ->assertStatus(422)
-            ->assertJsonPath('errors.documentos.0', self::MOTIVO);
-
-        $this->assertDatabaseCount('postulacion_documentos', 0);
-    }
-
     public function test_enviada_no_deja_eliminar_un_documento_ya_cargado(): void
     {
         [$aspirante, $postulacion] = $this->escenario('retirada');
-        $this->subir($aspirante, $postulacion, 'documentos/adicionales', ['titulo' => 'Curso'])->assertCreated();
-        $adicional = PostulacionDocumento::sole();
+        $this->subir($aspirante, $postulacion, 'documentos', ['codigo' => 'hoja_de_vida'])->assertCreated();
+        $cargado = PostulacionDocumento::sole();
 
         // La persona vuelve a postularse: desde ahí no se toca nada.
         $this->enviada($postulacion);
 
         $this->actingAs($aspirante)
-            ->deleteJson("/api/postulaciones/{$postulacion->id}/documentos/{$adicional->id}")
+            ->deleteJson("/api/postulaciones/{$postulacion->id}/documentos/{$cargado->id}")
             ->assertStatus(422)
             ->assertJsonPath('errors.documentos.0', self::MOTIVO);
 
@@ -103,14 +92,13 @@ class PostulacionEnviadaNoSeEditaTest extends TestCase
         [$aspirante, $postulacion, $skill] = $this->escenario('retirada');
 
         $this->subir($aspirante, $postulacion, 'documentos', ['codigo' => 'hoja_de_vida'])->assertCreated();
-        $this->subir($aspirante, $postulacion, 'documentos/adicionales', ['titulo' => 'Reconocimiento'])->assertCreated();
         $this->actingAs($aspirante)
             ->postJson("/api/postulaciones/{$postulacion->id}/skills", ['convocatoria_skill_id' => $skill->id])
             ->assertCreated();
 
         $this->enviada($postulacion);
 
-        $this->subir($aspirante, $postulacion, 'documentos/adicionales', ['titulo' => 'Otro'])->assertStatus(422);
-        $this->assertDatabaseCount('postulacion_documentos', 2);
+        $this->subir($aspirante, $postulacion, 'documentos', ['codigo' => 'hoja_de_vida'])->assertStatus(422);
+        $this->assertDatabaseCount('postulacion_documentos', 1);
     }
 }

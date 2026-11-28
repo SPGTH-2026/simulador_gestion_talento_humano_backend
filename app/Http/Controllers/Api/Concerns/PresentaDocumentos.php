@@ -68,14 +68,9 @@ trait PresentaDocumentos
             ->values();
 
         // Completo = todos los documentos OBLIGATORIOS están "subidos" o en
-        // "no_aplica" (la libreta de una mujer no se exige). Los opcionales y los
-        // adicionales no afectan la completitud. Misma regla que valida el envío.
+        // "no_aplica" (la libreta de una mujer no se exige). Los opcionales no
+        // afectan la completitud. Misma regla que valida el envío.
         $completo = $documentosService->completo($postulacion);
-
-        $adicionales = $postulacion->documentos
-            ->whereNull('parametro_id')
-            ->map(fn (PostulacionDocumento $d) => $this->adicionalResumen($d))
-            ->values();
 
         $skills = $postulacion->skills
             ->map(fn ($skill) => $this->skillResumen($skill))
@@ -102,7 +97,6 @@ trait PresentaDocumentos
                 : null,
             'datos_personales' => app(DatosPersonalesDePostulacion::class)->presentar($postulacion),
             'documentos' => $documentos,
-            'adicionales' => $adicionales,
             'skills' => $skills,
             'skills_convocatoria' => $postulacion->convocatoria->skills
                 ->map(fn (ConvocatoriaSkill $skill) => [
@@ -141,16 +135,6 @@ trait PresentaDocumentos
         ];
     }
 
-    private function adicionalResumen(PostulacionDocumento $documento): array
-    {
-        return [
-            'id' => $documento->id,
-            'titulo' => $documento->titulo,
-            'nota' => $documento->nota,
-            'archivo' => $this->archivoResumen($documento),
-        ];
-    }
-
     private function skillResumen($skill): array
     {
         return [
@@ -177,7 +161,6 @@ trait PresentaDocumentos
             'max' => 'El campo :attribute no debe superar :max caracteres.',
             'codigo.required' => 'El tipo de documento es obligatorio.',
             'parametro_id.required' => 'El tipo de documento es obligatorio.',
-            'titulo.required' => 'El título del documento adicional es obligatorio.',
             'archivo.required' => 'El archivo es obligatorio.',
             'archivo.file' => 'El archivo no es válido.',
             'archivo.mimes' => 'El archivo debe ser un PDF.',
@@ -191,8 +174,6 @@ trait PresentaDocumentos
         return [
             'codigo' => 'tipo de documento',
             'parametro_id' => 'tipo de documento',
-            'titulo' => 'título',
-            'nota' => 'nota',
             'archivo' => 'archivo',
         ];
     }

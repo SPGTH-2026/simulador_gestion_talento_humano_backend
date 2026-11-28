@@ -127,7 +127,7 @@ class PostulacionDocumentoCorreccionTest extends TestCase
             ->assertCreated();
     }
 
-    public function test_durante_correccion_no_se_suben_adicionales_ni_se_borran_documentos(): void
+    public function test_durante_correccion_no_se_borran_documentos(): void
     {
         $ficha = $this->ficha();
         $instructor = $this->instructor($ficha);
@@ -160,13 +160,6 @@ class PostulacionDocumentoCorreccionTest extends TestCase
             'mime' => 'application/pdf',
             'tamano_bytes' => 1024,
         ]);
-
-        $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
-            ->post("/api/postulaciones/{$postulacion->id}/documentos/adicionales", [
-                'titulo' => 'Certificado extra',
-                'archivo' => $this->pdf(),
-            ])
-            ->assertStatus(422);
 
         $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
             ->deleteJson("/api/postulaciones/{$postulacion->id}/documentos/{$opcional->id}")

@@ -86,7 +86,6 @@ class PortafolioController extends Controller
         $subidosPorParametro = $p->documentos
             ->whereNotNull('parametro_id')
             ->pluck('parametro_id');
-        $adicionales = $p->documentos->whereNull('parametro_id')->count();
 
         $conCertificado = $p->skills->filter->tieneCertificado()->count();
 
@@ -115,7 +114,6 @@ class PortafolioController extends Controller
                 'subidos' => $requeridos
                     ->filter(fn ($parametro) => $subidosPorParametro->contains($parametro->id))
                     ->count(),
-                'adicionales' => $adicionales,
             ],
             'skills' => [
                 'total' => $p->skills->count(),

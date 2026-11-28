@@ -22,7 +22,7 @@ use Symfony\Component\HttpFoundation\Response;
  * Este controlador solo hace la parte HTTP: valida la entrada, comprueba el acceso y responde. La escritura (reglas,
  * transacciones, invalidación de evaluaciones) está en EscribeDocumentoPostulacion; el disco, en AlmacenArchivos.
  *
- * - El aspirante dueño ve el estado, sube/reemplaza, borra y descarga sus documentos y adicionales. Una postulación ajena
+ * - El aspirante dueño ve el estado, sube/reemplaza, borra y descarga sus documentos. Una postulación ajena
  *   o inexistente -> 404.
  * - Solo se edita con la convocatoria publicada y dentro de la ventana, y con la postulación en 'borrador' (antes de
  *   enviar) o 'postulada' (después). Una 'retirada' también es editable mientras la ventana esté abierta.
@@ -99,26 +99,7 @@ class PostulacionDocumentoController extends Controller
         return response()->json(['data' => $this->archivoResumen($documento)], $codigoHttp);
     }
 
-    /** Sube un documento ADICIONAL ("tipo otro"): título obligatorio, nota opcional, máx. config. */
-    public function storeAdicional(Request $request, Postulacion $postulacion): JsonResponse
-    {
-        $this->exigirPropia($request, $postulacion);
-        $this->exigirEditable($postulacion, 'documentos');
-        $this->exigirSinCorreccionVigente($postulacion);
-
-        $datos = $request->validate([
-            'documento_id' => ['nullable', 'integer'],
-            'titulo' => ['required', 'string', 'max:'.config('convocatorias.titulo_adicional_max_longitud')],
-            'nota' => ['nullable', 'string', 'max:'.config('convocatorias.nota_adicional_max_longitud')],
-            'archivo' => $this->almacen->reglas(),
-        ], $this->mensajes(), $this->atributos());
-
-        [$documento, $codigoHttp] = $this->escribe->guardarAdicional($postulacion, $datos, $request->file('archivo'));
-
-        return response()->json(['data' => $this->adicionalResumen($documento)], $codigoHttp);
-    }
-
-    /** Borra un documento (requerido o adicional) de MI postulación. */
+    /** Borra un documento de MI postulación. */
     public function destroy(Request $request, Postulacion $postulacion, PostulacionDocumento $documento): JsonResponse
     {
         $this->exigirPropia($request, $postulacion);

@@ -105,29 +105,17 @@ class PortafolioListadoTest extends TestCase
         $this->assertFalse($p['completo']);
         $this->assertSame(2, $p['documentos']['requeridos']);
         $this->assertSame(1, $p['documentos']['subidos']);
-        $this->assertSame(0, $p['documentos']['adicionales']);
         $this->assertSame(0, $p['skills']['total']);
         $this->assertSame(0, $p['skills']['con_certificado']);
     }
 
-    public function test_el_resumen_cuenta_adicionales_y_certificados(): void
+    public function test_el_resumen_cuenta_las_skills_y_sus_certificados(): void
     {
         $ficha = $this->ficha();
         $instructor = $this->instructor($ficha);
         $aspirante = $this->aspirante($ficha);
         $convocatoria = $this->crearConvocatoria($ficha, $instructor);
         $postulacion = $this->crearPostulacion($convocatoria, $aspirante);
-
-        PostulacionDocumento::create([
-            'postulacion_id' => $postulacion->id,
-            'parametro_id' => null,
-            'titulo' => 'Certificado de curso',
-            'ruta' => 'documentos/adicional.pdf',
-            'disco' => 'local',
-            'nombre_original' => 'adicional.pdf',
-            'mime' => 'application/pdf',
-            'tamano_bytes' => 512,
-        ]);
 
         PostulacionSkill::create([
             'postulacion_id' => $postulacion->id,
@@ -145,7 +133,6 @@ class PortafolioListadoTest extends TestCase
             ->assertOk()
             ->json('data.postulaciones.0');
 
-        $this->assertSame(1, $p['documentos']['adicionales']);
         $this->assertSame(2, $p['skills']['total']);
         $this->assertSame(1, $p['skills']['con_certificado']);
     }

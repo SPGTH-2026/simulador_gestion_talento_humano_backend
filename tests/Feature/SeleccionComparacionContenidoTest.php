@@ -161,12 +161,10 @@ class SeleccionComparacionContenidoTest extends TestCase
             [['nombre' => 'PHP', 'declarada' => true, 'certificado_cargado' => true], ['nombre' => 'SQL', 'declarada' => true, 'certificado_cargado' => false]],
             $respuesta->json('data.0.skills.requeridas'),
         );
-        $this->assertSame(2, $respuesta->json('data.0.skills.adicionales'));
         $this->assertSame(
             [['nombre' => 'PHP', 'declarada' => false, 'certificado_cargado' => false], ['nombre' => 'SQL', 'declarada' => false, 'certificado_cargado' => false]],
             $respuesta->json('data.1.skills.requeridas'),
         );
-        $this->assertSame(0, $respuesta->json('data.1.skills.adicionales'));
         // Ni el nombre ni la ruta del archivo viajan.
         $this->assertStringNotContainsString('secreto-confidencial', $respuesta->getContent());
         $this->assertStringNotContainsString('ruta', $respuesta->getContent());

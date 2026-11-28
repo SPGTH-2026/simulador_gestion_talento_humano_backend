@@ -25,26 +25,6 @@ class PostulacionDocumentoLimpiezaTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_si_falla_al_crear_un_adicional_no_queda_el_archivo_en_el_disco(): void
-    {
-        Storage::fake('local');
-        [$aspirante, $postulacion] = $this->baseConDocumentos([]);
-        PostulacionDocumento::creating(fn () => throw new RuntimeException('falla simulada'));
-
-        $this->withoutExceptionHandling();
-        $this->expectException(RuntimeException::class);
-
-        try {
-            $this->actingAs($aspirante)->withHeaders(['Accept' => 'application/json'])
-                ->post("/api/postulaciones/{$postulacion->id}/documentos/adicionales", [
-                    'titulo' => 'Certificado',
-                    'archivo' => $this->pdf('certificado.pdf'),
-                ]);
-        } finally {
-            $this->assertSame([], Storage::disk('local')->allFiles());
-        }
-    }
-
     public function test_si_falla_al_crear_un_requerido_no_queda_el_archivo_en_el_disco(): void
     {
         Storage::fake('local');

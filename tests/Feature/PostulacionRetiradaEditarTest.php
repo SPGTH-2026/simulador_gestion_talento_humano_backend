@@ -31,30 +31,6 @@ class PostulacionRetiradaEditarTest extends TestCase
         $this->assertSame($antes, $this->estadoDe($postulacion));
     }
 
-    public function test_retirada_sube_y_elimina_adicional_dentro_de_la_ventana(): void
-    {
-        $ficha = $this->ficha();
-        $instructor = $this->instructor($ficha);
-        $aspirante = $this->aspirante($ficha);
-        $convocatoria = $this->convocatoriaAbierta($ficha, $instructor);
-        $postulacion = $this->postulacionRetirada($convocatoria, $aspirante);
-
-        $respuesta = $this->actingAs($aspirante)
-            ->postJson("/api/postulaciones/{$postulacion->id}/documentos/adicionales", [
-                'titulo' => 'Certificado extra',
-                'archivo' => $this->pdf(),
-            ])
-            ->assertCreated();
-
-        $documentoId = $respuesta->json('data.archivo.id');
-
-        $this->actingAs($aspirante)
-            ->deleteJson("/api/postulaciones/{$postulacion->id}/documentos/{$documentoId}")
-            ->assertNoContent();
-
-        $this->assertDatabaseMissing('postulacion_documentos', ['id' => $documentoId]);
-    }
-
     public function test_retirada_declara_skill_dentro_de_la_ventana(): void
     {
         $ficha = $this->ficha();
@@ -121,14 +97,14 @@ class PostulacionRetiradaEditarTest extends TestCase
         $ficha = $this->ficha();
         $instructor = $this->instructor($ficha);
         $aspirante = $this->aspirante($ficha);
-        $convocatoria = $this->convocatoriaAbierta($ficha, $instructor, [
+        $convocatoria = $this->conDocumentos($this->convocatoriaAbierta($ficha, $instructor, [
             'estado_id' => $this->parametroId('estado_convocatoria', 'en_proceso'),
-        ]);
+        ]), ['hoja_de_vida' => true]);
         $postulacion = $this->postulacionRetirada($convocatoria, $aspirante);
 
         $this->actingAs($aspirante)
-            ->postJson("/api/postulaciones/{$postulacion->id}/documentos/adicionales", [
-                'titulo' => 'Certificado extra',
+            ->postJson("/api/postulaciones/{$postulacion->id}/documentos", [
+                'codigo' => 'hoja_de_vida',
                 'archivo' => $this->pdf(),
             ])
             ->assertStatus(422)

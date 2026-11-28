@@ -31,7 +31,7 @@ use Illuminate\Http\Request;
  *  - Evaluador y referencia documental: solo Instructor y Superadministrador, como en la referencia documental. Para los
  *    demás roles `meta.evaluador_visible` es false y no se envía ningún nombre de evaluador.
  *  - Skills: las de la convocatoria con su estado («declarada» y «certificado cargado», que es solo la existencia de un
- *    archivo, no una validación) y el total de skills adicionales. Nunca se envía el archivo, su ruta ni su nombre.
+ *    archivo, no una validación). Nunca se envía el archivo, su ruta ni su nombre.
  */
 class ComparacionSeleccionController extends Controller
 {
@@ -157,7 +157,6 @@ class ComparacionSeleccionController extends Controller
                             'certificado_cargado' => $declarada !== null && $declarada->certificado_ruta !== null,
                         ];
                     })->values(),
-                    'adicionales' => $propiasSkills->whereNull('convocatoria_skill_id')->count(),
                 ],
             ];
         })->values();

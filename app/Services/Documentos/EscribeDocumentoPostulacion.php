@@ -15,8 +15,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Escritura de los documentos de una postulación: subir o reemplazar un requerido, agregar o reemplazar un adicional, y
- * eliminar. Aquí están las reglas de negocio de esa escritura; el controlador solo valida la entrada, comprueba el acceso
+ * Escritura de los documentos de una postulación: subir o reemplazar un requerido y eliminar. Aquí están las reglas de negocio de esa escritura; el controlador solo valida la entrada, comprueba el acceso
  * y responde.
  *
  * Las comprobaciones de acceso (dueño, ventana de edición, corrección vigente) las hace el controlador antes de llamar
@@ -92,84 +91,8 @@ final class EscribeDocumentoPostulacion
     }
 
     /**
-     * Agrega un adicional, o reemplaza el archivo (y el título y la nota) de uno existente si viene `documento_id`. El
-     * reemplazo no gasta cupo.
-     *
-     * @param  array{documento_id: ?int, titulo: string, nota: ?string}  $datos
-     * @return array{0: PostulacionDocumento, 1: int}
-     */
-    public function guardarAdicional(Postulacion $postulacion, array $datos, UploadedFile $archivo): array
-    {
-        $maxAdicionales = (int) config('convocatorias.documentos_adicionales_max');
-
-        $reemplazo = null;
-
-        if (! empty($datos['documento_id'])) {
-            $reemplazo = PostulacionDocumento::query()
-                ->where('postulacion_id', $postulacion->id)
-                ->whereNull('parametro_id')
-                ->find($datos['documento_id']);
-
-            if (! $reemplazo) {
-                throw ValidationException::withMessages([
-                    'documento_id' => 'Ese documento adicional no existe en esta postulación.',
-                ]);
-            }
-        } else {
-            $actuales = PostulacionDocumento::query()
-                ->where('postulacion_id', $postulacion->id)
-                ->whereNull('parametro_id')
-                ->count();
-
-            if ($actuales >= $maxAdicionales) {
-                throw ValidationException::withMessages([
-                    'titulo' => "No puedes agregar más de {$maxAdicionales} documentos adicionales.",
-                ]);
-            }
-        }
-
-        $nuevo = $this->almacen->guardar($archivo, RutaDocumento::carpeta($postulacion, 'adicionales'));
-
-        $campos = $nuevo + [
-            'titulo' => $datos['titulo'],
-            'nota' => $datos['nota'] ?? null,
-        ];
-
-        if ($reemplazo) {
-            $anterior = [$reemplazo->disco, $reemplazo->ruta];
-            $this->conArchivoNuevo($nuevo, fn () => $reemplazo->update($campos));
-            $this->almacen->borrar(...$anterior);
-
-            return [$reemplazo->fresh(), 200];
-        }
-
-        // Recuento y alta bajo el bloqueo de la postulación: dos adicionales simultáneos no pueden superar el tope.
-        $documento = $this->conArchivoNuevo($nuevo, fn () => DB::transaction(function () use ($postulacion, $campos, $maxAdicionales) {
-            Postulacion::query()->whereKey($postulacion->id)->lockForUpdate()->first();
-
-            $total = PostulacionDocumento::query()
-                ->where('postulacion_id', $postulacion->id)
-                ->whereNull('parametro_id')
-                ->count();
-
-            if ($total >= $maxAdicionales) {
-                throw ValidationException::withMessages([
-                    'titulo' => "No puedes agregar más de {$maxAdicionales} documentos adicionales.",
-                ]);
-            }
-
-            return PostulacionDocumento::create($campos + [
-                'postulacion_id' => $postulacion->id,
-                'parametro_id' => null,
-            ]);
-        }));
-
-        return [$documento, 201];
-    }
-
-    /**
-     * Ejecuta la escritura en base de datos cuando el archivo nuevo ya está en el disco. Si la escritura falla (el tope
-     * de adicionales lo superó otra subida, error de base de datos), borra ese archivo para que no quede huérfano.
+     * Ejecuta la escritura en base de datos cuando el archivo nuevo ya está en el disco. Si la escritura falla (por ejemplo, un
+     * error de base de datos), borra ese archivo para que no quede huérfano.
      */
     private function conArchivoNuevo(array $nuevo, callable $escribir): mixed
     {

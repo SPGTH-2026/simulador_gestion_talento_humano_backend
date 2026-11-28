@@ -201,9 +201,6 @@ Route::middleware(['auth:sanctum', 'verified', 'ficha'])->group(function () {
         Route::post('postulaciones/{postulacion}/documentos', [PostulacionDocumentoController::class, 'store'])
             ->whereNumber('postulacion')
             ->missing(fn () => abort(404, 'Postulación no encontrada.'));
-        Route::post('postulaciones/{postulacion}/documentos/adicionales', [PostulacionDocumentoController::class, 'storeAdicional'])
-            ->whereNumber('postulacion')
-            ->missing(fn () => abort(404, 'Postulación no encontrada.'));
         Route::delete('postulaciones/{postulacion}/documentos/{documento}', [PostulacionDocumentoController::class, 'destroy'])
             ->whereNumber('postulacion')->whereNumber('documento')
             ->missing(fn () => abort(404, 'Postulación no encontrada.'));

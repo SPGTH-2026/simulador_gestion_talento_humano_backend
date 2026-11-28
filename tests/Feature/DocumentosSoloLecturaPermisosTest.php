@@ -68,23 +68,17 @@ class DocumentosSoloLecturaPermisosTest extends TestCase
         $this->assertSame('hoja.pdf', PostulacionDocumento::sole()->nombre_original);
     }
 
-    public function test_el_instructor_no_puede_agregar_ni_reemplazar_adicionales(): void
+    public function test_la_ruta_de_documentos_adicionales_ya_no_existe(): void
     {
-        [, $postulacion, $instructor] = $this->base();
+        [$aspirante, $postulacion] = $this->base();
 
-        $this->assertRechazada($this->actingAs($instructor)
-            ->withHeaders(['Accept' => 'application/json'])
-            ->post("/api/revision/postulaciones/{$postulacion->id}/documentos/adicionales", [
-                'titulo' => 'Extra',
-                'archivo' => $this->pdf(),
-            ]));
-
-        $this->assertRechazada($this->actingAs($instructor)
+        $this->actingAs($aspirante)
             ->withHeaders(['Accept' => 'application/json'])
             ->post("/api/postulaciones/{$postulacion->id}/documentos/adicionales", [
                 'titulo' => 'Extra',
                 'archivo' => $this->pdf(),
-            ]));
+            ])
+            ->assertNotFound();
 
         $this->assertSame(0, PostulacionDocumento::count());
     }

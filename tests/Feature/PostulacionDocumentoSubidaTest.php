@@ -33,7 +33,7 @@ class PostulacionDocumentoSubidaTest extends TestCase
         $respuesta->assertJsonPath('data.editable', true);
         $respuesta->assertJsonPath('data.completo', false);
         $respuesta->assertJsonPath('data.requiere_sexo', false);
-        $respuesta->assertJsonPath('data.adicionales', []);
+        $this->assertArrayNotHasKey('adicionales', $respuesta->json('data'));
         $respuesta->assertJsonPath('data.skills', []);
 
         $documentos = collect($respuesta->json('data.documentos'))
