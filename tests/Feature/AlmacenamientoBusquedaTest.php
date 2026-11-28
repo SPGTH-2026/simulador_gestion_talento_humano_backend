@@ -149,7 +149,7 @@ class AlmacenamientoBusquedaTest extends TestCase
 
         $aspirante = $this->usuario(Role::Aspirante, null, ['ficha_id' => $ficha->id]);
         $postulacion = $this->postulacion($convocatoria, $aspirante);
-        // 25 adicionales (más de una página de 20) y un obligatorio que no debe entrar en la selección.
+        // 25 adicionales (más de una página de 20) y un obligatorio: Almacenamiento borra también los obligatorios.
         for ($i = 1; $i <= 25; $i++) {
             $this->adicional($postulacion, "extra {$i}");
         }
@@ -165,8 +165,8 @@ class AlmacenamientoBusquedaTest extends TestCase
 
         $respuesta = $this->actingAs($instructor)->getJson("/api/almacenamiento/fichas/{$ficha->id}/documentos/ids")->assertOk();
 
-        $this->assertSame(25, $respuesta->json('data.total'));
-        $this->assertCount(25, $respuesta->json('data.ids'));
+        $this->assertSame(26, $respuesta->json('data.total'));
+        $this->assertCount(26, $respuesta->json('data.ids'));
     }
 
     public function test_seleccionar_todos_respeta_la_busqueda(): void
@@ -175,8 +175,8 @@ class AlmacenamientoBusquedaTest extends TestCase
 
         $respuesta = $this->actingAs($instructor)->getJson("/api/almacenamiento/fichas/{$ficha->id}/documentos/ids?q=luis")->assertOk();
 
-        // Solo el adicional de Luis es borrable: su hoja de vida es obligatoria.
-        $this->assertSame(1, $respuesta->json('data.total'));
+        // Luis tiene un adicional y una hoja de vida obligatoria: ambos se pueden borrar desde Almacenamiento.
+        $this->assertSame(2, $respuesta->json('data.total'));
     }
 
     public function test_el_aprendiz_general_busca_pero_no_obtiene_ids_para_borrar(): void
